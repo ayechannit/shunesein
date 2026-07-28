@@ -1,0 +1,4 @@
+.app-shell {
+  min-height: 100vh;
+}
+/* The app-shell has no overflow — page scrolls naturally via browser */
