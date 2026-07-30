@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const logAction = require('../utils/auditLogger');
+const { postJournalEntry, reverseJournalEntries, ACCOUNT_CODES } = require('../utils/journalPoster');
 const HttpError = require('../utils/HttpError');
 
 const ALLOWED_ENTRY_SORT = ['id', 'date', 'amount', 'created_at'];
@@ -48,6 +49,26 @@ class FinanceController {
 
         const adjustment = category.type === 'income' ? numericAmount : -numericAmount;
         await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [adjustment, account_id]);
+
+        // General Ledger: income moves cash in against Other Income; an
+        // expense moves cash out against Operating Expenses. Posted at the
+        // rollup level (not per-category) - see migration 011.
+        await postJournalEntry(client, {
+          date: entryRecord.date,
+          referenceType: 'income_expense_entry',
+          referenceId: entryRecord.id,
+          description: entryRecord.description || category.name,
+          createdBy: req.user.id,
+          lines: category.type === 'income'
+            ? [
+                { code: ACCOUNT_CODES.CASH_AND_BANK, debit: numericAmount },
+                { code: ACCOUNT_CODES.OTHER_INCOME, credit: numericAmount },
+              ]
+            : [
+                { code: ACCOUNT_CODES.OPERATING_EXPENSES, debit: numericAmount },
+                { code: ACCOUNT_CODES.CASH_AND_BANK, credit: numericAmount },
+              ],
+        });
 
         await logAction(req.user.id, 'CREATE', 'income_expense_entries', entryRecord.id, null, entryRecord);
         return entryRecord;
@@ -112,6 +133,8 @@ class FinanceController {
           const reversal = categoryType === 'income' ? -Number(entry.amount) : Number(entry.amount);
           await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [reversal, entry.account_id]);
         }
+
+        await reverseJournalEntries(client, { referenceType: 'income_expense_entry', referenceId: id, description: 'Deleted income/expense entry', createdBy: req.user.id });
 
         await client.query('DELETE FROM income_expense_entries WHERE id = $1', [id]);
         await logAction(req.user.id, 'DELETE', 'income_expense_entries', id, entry, null);

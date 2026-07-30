@@ -20,14 +20,19 @@ import {
   UploadIcon,
   DownloadIcon,
   WalletIcon,
+  PencilIcon,
+  ShieldIcon,
+  TrashIcon,
 } from '../components/masterData/MasterDataPrimitives';
+import Dashboard from './Dashboard';
 import Procurement from './Procurement';
 import Sales from './Sales';
 import Inventory from './Inventory';
 import Finance from './Finance';
 import Delivery from './Delivery';
+import Reports from './Reports';
 import AuditLog from './AuditLog';
-import Settings from './Settings';
+import { formatDateTime, detectBrowserTimezone, listTimezones } from '../utils/datetime';
 
 const API_ROOT = 'http://localhost:5000/api';
 const PAGE_SIZES = [5, 10, 20, 50];
@@ -93,12 +98,6 @@ const buildRequest = async (url, token, options = {}) => {
   return payload;
 };
 
-const formatDateTime = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
-};
-
 const formatNumber = (value) => {
   if (value === null || value === undefined || value === '') return '-';
   const numeric = Number(value);
@@ -150,11 +149,15 @@ const normalizePayload = (moduleConfig, values) =>
     }
 
     if (field.type === 'number') {
+      // Balance-like columns (credit_limit, outstanding_balance, account
+      // balance) are NOT NULL in the database - a blank field means "zero,"
+      // not "no value," so it must not be sent as null.
+      const blankValue = field.zeroDefault ? 0 : null;
       if (rawValue === '' || rawValue === null || rawValue === undefined) {
-        payload[field.key] = null;
+        payload[field.key] = blankValue;
       } else {
         const numeric = Number(rawValue);
-        payload[field.key] = Number.isNaN(numeric) ? null : numeric;
+        payload[field.key] = Number.isNaN(numeric) ? blankValue : numeric;
       }
       return payload;
     }
@@ -202,6 +205,15 @@ const createInitialModuleState = (moduleConfig) => ({
 
 const MASTER_SECTIONS = [
   {
+    key: 'overview',
+    title: 'Overview',
+    items: MASTER_DATA_MODULE_ORDER.filter((moduleKey) => MASTER_DATA_MODULES[moduleKey].group === 'Overview').map((moduleKey) => ({
+      key: moduleKey,
+      label: MASTER_DATA_MODULES[moduleKey].label,
+      icon: iconForModule(moduleKey),
+    })),
+  },
+  {
     key: 'master-data',
     title: 'Master Data',
     items: MASTER_DATA_MODULE_ORDER.filter((moduleKey) => MASTER_DATA_MODULES[moduleKey].group === 'Master Data').map((moduleKey) => ({
@@ -247,6 +259,15 @@ const MASTER_SECTIONS = [
     })),
   },
   {
+    key: 'reports',
+    title: 'Reports',
+    items: MASTER_DATA_MODULE_ORDER.filter((moduleKey) => MASTER_DATA_MODULES[moduleKey].group === 'Reports').map((moduleKey) => ({
+      key: moduleKey,
+      label: MASTER_DATA_MODULES[moduleKey].label,
+      icon: iconForModule(moduleKey),
+    })),
+  },
+  {
     key: 'access-control',
     title: 'Access Control',
     items: MASTER_DATA_MODULE_ORDER.filter((moduleKey) => MASTER_DATA_MODULES[moduleKey].group === 'Access Control').map((moduleKey) => ({
@@ -259,11 +280,13 @@ const MASTER_SECTIONS = [
 
 function iconForModule(moduleKey) {
   switch (moduleKey) {
+    case 'dashboard':
+      return 'dashboard';
     case 'categories':
       return 'grid';
     case 'products':
       return 'package';
-    case 'product-types':
+    case 'pricing-tiers':
       return 'tag';
     case 'suppliers':
       return 'truck';
@@ -278,9 +301,13 @@ function iconForModule(moduleKey) {
     case 'purchase-orders':
     case 'purchase-vouchers':
       return 'truck';
+    case 'purchase-returns':
+      return 'refresh';
     case 'sale-orders':
     case 'sales-invoices':
       return 'copy';
+    case 'sales-returns':
+      return 'refresh';
     case 'production-batches':
       return 'package';
     case 'stock-transfers':
@@ -299,12 +326,88 @@ function iconForModule(moduleKey) {
       return 'grid';
     case 'delivery':
       return 'truck';
+    case 'report-current-stock':
+      return 'package';
+    case 'report-low-stock':
+      return 'alertTriangle';
+    case 'report-stock-movement':
+      return 'refresh';
+    case 'report-stock-ledger':
+      return 'grid';
+    case 'report-purchase-summary':
+      return 'truck';
+    case 'report-production-summary':
+      return 'package';
+    case 'report-sales-summary':
+      return 'copy';
+    case 'report-sales-by-category':
+      return 'tag';
+    case 'report-payment-method-analysis':
+      return 'credit-card';
+    case 'report-outstanding':
+      return 'wallet';
+    case 'report-profit-loss':
+      return 'tag';
+    case 'report-tax-summary':
+      return 'credit-card';
+    case 'report-expense':
+      return 'wallet';
+    case 'report-customer-statement':
+      return 'users';
+    case 'report-supplier-statement':
+      return 'truck';
+    case 'report-sales-backlog':
+      return 'copy';
+    case 'report-open-purchase-orders':
+      return 'truck';
+    case 'report-inventory-valuation':
+      return 'warehouse';
+    case 'report-slow-moving-stock':
+      return 'alertTriangle';
+    case 'report-abc-analysis':
+      return 'tag';
+    case 'report-stock-transfer-register':
+      return 'refresh';
+    case 'report-stock-adjustment':
+      return 'pencil';
+    case 'report-po-variance':
+      return 'truck';
+    case 'report-supplier-price-trend':
+      return 'truck';
+    case 'report-cash-flow':
+      return 'wallet';
+    case 'report-fund-transfer-register':
+      return 'refresh';
+    case 'report-delivery-performance':
+      return 'truck';
+    case 'report-document-register':
+      return 'grid';
+    case 'report-salesperson-performance':
+      return 'users';
+    case 'report-supplier-scorecard':
+      return 'shield';
+    case 'report-expiry':
+      return 'alertTriangle';
+    case 'report-sales-returns':
+    case 'report-purchase-returns':
+      return 'refresh';
+    case 'report-chart-of-accounts':
+      return 'grid';
+    case 'report-trial-balance':
+      return 'tag';
+    case 'report-balance-sheet':
+      return 'wallet';
+    case 'report-journal-register':
+      return 'copy';
     case 'audit-log':
       return 'eye';
+    case 'users':
+      return 'users';
     case 'roles':
       return 'shield';
     case 'permissions':
-    case 'settings':
+      return 'settings';
+    case 'print-page-setups':
       return 'settings';
     default:
       return 'dashboard';
@@ -313,7 +416,7 @@ function iconForModule(moduleKey) {
 
 const MasterDataManagement = ({ token, onLogout }) => {
   const decodedToken = parseJwt(token);
-  const defaultModule = 'categories';
+  const defaultModule = 'dashboard';
   const [activeModuleKey, setActiveModuleKey] = useState(defaultModule);
   const [moduleStates, setModuleStates] = useState(() =>
     MASTER_DATA_MODULE_ORDER.reduce((accumulator, moduleKey) => {
@@ -331,6 +434,14 @@ const MasterDataManagement = ({ token, onLogout }) => {
     'access-control': true,
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [profileDialog, setProfileDialog] = useState({
+    open: false,
+    values: { full_name: '', timezone: 'UTC' },
+    saving: false,
+    error: '',
+  });
+  const [tzSuggestion, setTzSuggestion] = useState('');
   const [permissionsDialog, setPermissionsDialog] = useState({
     open: false,
     role: null,
@@ -346,6 +457,14 @@ const MasterDataManagement = ({ token, onLogout }) => {
     saving: false,
     error: '',
   });
+  const [tiersDialog, setTiersDialog] = useState({
+    open: false,
+    record: null,
+    tiers: [],
+    loading: false,
+    saving: false,
+    error: '',
+  });
   const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
   const [bulkPricingDialog, setBulkPricingDialog] = useState({
     open: false,
@@ -357,8 +476,12 @@ const MasterDataManagement = ({ token, onLogout }) => {
   });
   const fileInputRef = useRef(null);
   const menuRef = useRef(null);
-  const activeModule = MASTER_DATA_MODULES[activeModuleKey];
-  const activeState = moduleStates[activeModuleKey];
+  // Falls back to the default module if activeModuleKey ever points at a key
+  // that no longer exists (e.g. a module removed from config while a stale
+  // key survived a dev-server hot reload) - otherwise every derived value
+  // below is undefined and the page crashes instead of just resetting.
+  const activeModule = MASTER_DATA_MODULES[activeModuleKey] || MASTER_DATA_MODULES[defaultModule];
+  const activeState = moduleStates[activeModuleKey] || moduleStates[defaultModule];
 
   const updateModuleState = (moduleKey, patch) => {
     setModuleStates((previous) => {
@@ -474,6 +597,13 @@ const MasterDataManagement = ({ token, onLogout }) => {
   useEffect(() => {
     const stateSnapshot = moduleStates[activeModuleKey];
     if (!stateSnapshot) return;
+    // Modules with a custom renderType (reports, sales, audit, dashboard...)
+    // render their own bespoke page and never read the generic list state
+    // this fetches - calling it for them anyway used to fire a "list" request
+    // (page/limit/search/sortBy params) against endpoints that don't expect
+    // that shape (e.g. a report or the stock ledger), producing a 400 that
+    // was silently swallowed by the UI but still visible in the console.
+    if (activeModule.renderType) return;
 
     loadModuleData(activeModuleKey, stateSnapshot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -591,7 +721,10 @@ const MasterDataManagement = ({ token, onLogout }) => {
 
     const nextErrors = {};
     activeModule.fields.forEach((field) => {
-      if (field.required) {
+      // requiredOnCreate: only enforced while creating - e.g. a password
+      // field that's mandatory for a new user but optional on edit (blank
+      // there means "leave the current password unchanged").
+      if (field.required || (field.requiredOnCreate && !activeState.editingRecord)) {
         const value = activeState.formValues[field.key];
         const isEmpty = value === null || value === undefined || value === '';
         if (isEmpty) {
@@ -803,6 +936,76 @@ const MasterDataManagement = ({ token, onLogout }) => {
     }
   };
 
+  // Fetch the logged-in user's own current profile (timezone included) once
+  // on mount - the JWT payload doesn't carry it and wouldn't reflect a later
+  // change until the next login anyway.
+  useEffect(() => {
+    let cancelled = false;
+    buildRequest(`${API_ROOT}/auth/profile`, token)
+      .then((response) => {
+        if (cancelled) return;
+        setCurrentUser(response.user);
+        const browserTz = detectBrowserTimezone();
+        if (response.user.timezone === 'UTC' && browserTz !== 'UTC') {
+          setTzSuggestion(browserTz);
+        }
+      })
+      .catch(() => {
+        // Non-fatal - the profile button just won't have anything to edit yet.
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token]);
+
+  const openProfileDialog = () => {
+    if (!currentUser) return;
+    setProfileDialog({
+      open: true,
+      values: { full_name: currentUser.full_name || '', timezone: currentUser.timezone || 'UTC' },
+      saving: false,
+      error: '',
+    });
+  };
+
+  const closeProfileDialog = () => {
+    setProfileDialog({ open: false, values: { full_name: '', timezone: 'UTC' }, saving: false, error: '' });
+  };
+
+  const saveProfile = async () => {
+    setProfileDialog((previous) => ({ ...previous, saving: true, error: '' }));
+    try {
+      const response = await buildRequest(`${API_ROOT}/auth/profile`, token, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(profileDialog.values),
+      });
+      setCurrentUser(response.user);
+      setTzSuggestion('');
+      closeProfileDialog();
+    } catch (error) {
+      if (error.status === 401) {
+        onLogout();
+        return;
+      }
+      setProfileDialog((previous) => ({ ...previous, saving: false, error: error.message || 'Unable to save profile.' }));
+    }
+  };
+
+  const acceptTimezoneSuggestion = async () => {
+    try {
+      const response = await buildRequest(`${API_ROOT}/auth/profile`, token, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ timezone: tzSuggestion }),
+      });
+      setCurrentUser(response.user);
+    } catch {
+      // If this fails, the suggestion banner just stays for another try.
+      return;
+    }
+    setTzSuggestion('');
+  };
+
   const openPricingDialog = (record) => {
     setPricingDialog({
       open: true,
@@ -853,6 +1056,65 @@ const MasterDataManagement = ({ token, onLogout }) => {
 
   const closePricingDialog = () => {
     setPricingDialog({ open: false, record: null, values: { cost_price: '', markup_type: 'fixed', markup_value: '' }, saving: false, error: '' });
+  };
+
+  // Quantity-tier pricing: pick a product, define quantity ranges and the
+  // price for each range - no price list to create first (see PricingController).
+  const openTiersDialog = async (record) => {
+    setTiersDialog({ open: true, record, tiers: [], loading: true, saving: false, error: '' });
+    try {
+      const response = await buildRequest(`${API_ROOT}/pricing/products/${record.id}/tiers`, token);
+      const tiers = (response.data || []).map((tier) => ({ min_quantity: String(tier.min_quantity), unit_price: String(tier.unit_price) }));
+      setTiersDialog({ open: true, record, tiers, loading: false, saving: false, error: '' });
+    } catch (error) {
+      if (error.status === 401) {
+        onLogout();
+        return;
+      }
+      setTiersDialog((previous) => ({ ...previous, loading: false, error: error.message || 'Unable to load pricing tiers.' }));
+    }
+  };
+
+  const closeTiersDialog = () => {
+    setTiersDialog({ open: false, record: null, tiers: [], loading: false, saving: false, error: '' });
+  };
+
+  const addTierRow = () => {
+    setTiersDialog((previous) => ({ ...previous, tiers: [...previous.tiers, { min_quantity: '', unit_price: '' }] }));
+  };
+
+  const updateTierRow = (index, key, value) => {
+    setTiersDialog((previous) => ({
+      ...previous,
+      tiers: previous.tiers.map((tier, tierIndex) => (tierIndex === index ? { ...tier, [key]: value } : tier)),
+    }));
+  };
+
+  const removeTierRow = (index) => {
+    setTiersDialog((previous) => ({ ...previous, tiers: previous.tiers.filter((_, tierIndex) => tierIndex !== index) }));
+  };
+
+  const saveTiers = async () => {
+    if (!tiersDialog.record) return;
+    setTiersDialog((previous) => ({ ...previous, saving: true, error: '' }));
+    try {
+      await buildRequest(`${API_ROOT}/pricing/products/${tiersDialog.record.id}/tiers`, token, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tiers: tiersDialog.tiers.map((tier) => ({ min_quantity: Number(tier.min_quantity), unit_price: Number(tier.unit_price) })),
+        }),
+      });
+      closeTiersDialog();
+      updateActiveState({ success: 'Pricing tiers saved.' });
+      await loadModuleData(activeModuleKey, { ...activeState, loading: true });
+    } catch (error) {
+      if (error.status === 401) {
+        onLogout();
+        return;
+      }
+      setTiersDialog((previous) => ({ ...previous, saving: false, error: error.message || 'Unable to save pricing tiers.' }));
+    }
   };
 
   const toggleRowSelection = (id) => {
@@ -956,6 +1218,20 @@ const MasterDataManagement = ({ token, onLogout }) => {
     await loadModuleData(activeModuleKey, { ...activeState, loading: true });
   };
 
+  const handleSetDefaultPrintPageSetup = async (record) => {
+    try {
+      await buildRequest(`${activeModule.apiBase}/${record.id}/set-default`, token, { method: 'POST' });
+      updateActiveState({ success: `"${record.name}" is now the default print page setup.` });
+      await loadModuleData(activeModuleKey, { ...activeState, loading: true });
+    } catch (error) {
+      if (error.status === 401) {
+        onLogout();
+        return;
+      }
+      updateActiveState({ error: error.message || 'Unable to set default.' });
+    }
+  };
+
   const handleExtraAction = (action, record) => {
     if (action === 'assign-permissions') {
       openPermissionsDialog(record);
@@ -963,6 +1239,47 @@ const MasterDataManagement = ({ token, onLogout }) => {
     if (action === 'set-price') {
       openPricingDialog(record);
     }
+    if (action === 'quantity-pricing') {
+      // The Products list passes the product itself (id/name are the
+      // product's own); the consolidated Quantity Pricing overview passes a
+      // tier row instead, which carries the product under product_id/product_name.
+      openTiersDialog({ id: record.product_id || record.id, name: record.product_name || record.name });
+    }
+    if (action === 'set-default') {
+      handleSetDefaultPrintPageSetup(record);
+    }
+  };
+
+  // The Owner role is the one every install seeds with every permission -
+  // editing it, changing its permission set, or deleting it risks locking
+  // every admin out of the system, so those three actions are hidden for it
+  // specifically. Every other role keeps the normal Edit/Permissions/Delete menu.
+  const renderRoleRowActions = (row) => {
+    if (row.name !== 'Owner') {
+      return (
+        <div className="dropdown-menu-list">
+          <button type="button" className="dropdown-menu-item" onClick={() => { openEdit(row); updateActiveState({ menuOpenId: null }); }}>
+            <PencilIcon className="menu-icon" />
+            <span>Edit</span>
+          </button>
+          <button type="button" className="dropdown-menu-item" onClick={() => { handleExtraAction('assign-permissions', row); updateActiveState({ menuOpenId: null }); }}>
+            <ShieldIcon className="menu-icon" />
+            <span>Permissions</span>
+          </button>
+          <button type="button" className="dropdown-menu-item danger" onClick={() => { askDelete(row); updateActiveState({ menuOpenId: null }); }}>
+            <TrashIcon className="menu-icon" />
+            <span>Delete</span>
+          </button>
+        </div>
+      );
+    }
+    return (
+      <div className="dropdown-menu-list">
+        <span className="dropdown-menu-item" style={{ color: 'var(--md-muted)', cursor: 'default' }}>
+          Owner role is protected
+        </span>
+      </div>
+    );
   };
 
   const renderTableCell = (row, column) => {
@@ -982,6 +1299,10 @@ const MasterDataManagement = ({ token, onLogout }) => {
       return <StatusBadge value={Boolean(value)} />;
     }
 
+    if (column.key === 'is_default') {
+      return value ? <span className="status-badge status-badge-success">Default</span> : '-';
+    }
+
     if (column.key === 'status') {
       return <StatusBadge value={value || '-'} />;
     }
@@ -991,7 +1312,11 @@ const MasterDataManagement = ({ token, onLogout }) => {
     }
 
     if (column.key === 'created_at' || column.key === 'updated_at') {
-      return formatDateTime(value);
+      return formatDateTime(value, currentUser?.timezone);
+    }
+
+    if (column.key === 'last_login') {
+      return value ? formatDateTime(value, currentUser?.timezone) : 'Never';
     }
 
     return value === null || value === undefined || value === '' ? '-' : String(value);
@@ -1004,16 +1329,20 @@ const MasterDataManagement = ({ token, onLogout }) => {
           Set Price ({selectedRowIds.size})
         </AppButton>
       ) : null}
-      <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>
-        {activeModule.createButtonLabel}
-      </AppButton>
-      <AppButton variant="secondary" iconLeft={<UploadIcon className="button-icon" />} onClick={() => fileInputRef.current?.click()}>
-        Import
-      </AppButton>
+      {!activeModule.readOnly ? (
+        <>
+          <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>
+            {activeModule.createButtonLabel}
+          </AppButton>
+          <AppButton variant="secondary" iconLeft={<UploadIcon className="button-icon" />} onClick={() => fileInputRef.current?.click()}>
+            Import
+          </AppButton>
+          <input ref={fileInputRef} type="file" accept=".csv" hidden onChange={handleImport} />
+        </>
+      ) : null}
       <AppButton variant="secondary" iconLeft={<DownloadIcon className="button-icon" />} onClick={handleExport}>
         Export
       </AppButton>
-      <input ref={fileInputRef} type="file" accept=".csv" hidden onChange={handleImport} />
     </>
   );
 
@@ -1061,6 +1390,7 @@ const MasterDataManagement = ({ token, onLogout }) => {
         onLogout={onLogout}
         userLabel={decodedToken?.username || 'admin'}
         userRole={decodedToken?.role_name || 'Owner'}
+        onOpenProfile={openProfileDialog}
         className={sidebarOpen ? 'is-open' : ''}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
@@ -1074,6 +1404,16 @@ const MasterDataManagement = ({ token, onLogout }) => {
           </button>
         </div>
 
+        {tzSuggestion ? (
+          <div className="status-banner" style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <span>You appear to be in <strong>{tzSuggestion}</strong>. Use this timezone for your account so dates and times show correctly for you?</span>
+            <div style={{ display: 'flex', gap: '8px', flexShrink: 0 }}>
+              <button type="button" className="master-button master-button-secondary" onClick={() => setTzSuggestion('')}>Not now</button>
+              <button type="button" className="master-button master-button-primary" onClick={acceptTimezoneSuggestion}>Use {tzSuggestion}</button>
+            </div>
+          </div>
+        ) : null}
+
         {activeModule.renderType === 'procurement' ? (
           <Procurement token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
         ) : activeModule.renderType === 'sales' ? (
@@ -1084,10 +1424,12 @@ const MasterDataManagement = ({ token, onLogout }) => {
           <Finance token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
         ) : activeModule.renderType === 'delivery' ? (
           <Delivery token={token} onLogout={onLogout} embedded />
+        ) : activeModule.renderType === 'reports' ? (
+          <Reports token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
         ) : activeModule.renderType === 'audit' ? (
-          <AuditLog token={token} onLogout={onLogout} embedded />
-        ) : activeModule.renderType === 'settings' ? (
-          <Settings token={token} embedded />
+          <AuditLog token={token} onLogout={onLogout} embedded viewerTimezone={currentUser?.timezone} />
+        ) : activeModule.renderType === 'dashboard' ? (
+          <Dashboard token={token} onLogout={onLogout} embedded />
         ) : (
           <>
             <PageHeader breadcrumb={breadcrumb} title={activeModule.title} description={activeModule.description} actions={pageActions} />
@@ -1136,10 +1478,11 @@ const MasterDataManagement = ({ token, onLogout }) => {
                 columns={activeModule.columns}
                 rows={visibleRecords}
                 loading={activeState.loading}
-                rowActions={activeModule.actions ? ['edit', 'delete', ...activeModule.actions] : ['edit', 'delete']}
+                rowActions={activeModule.readOnly ? (activeModule.actions || []) : (activeModule.actions ? ['edit', 'delete', ...activeModule.actions] : ['edit', 'delete'])}
                 onEdit={openEdit}
                 onDelete={askDelete}
                 onExtraAction={handleExtraAction}
+                renderRowActions={activeModuleKey === 'roles' ? renderRoleRowActions : undefined}
                 menuOpenId={activeState.menuOpenId}
                 onToggleMenu={(menuOpenId) => updateActiveState({ menuOpenId })}
                 menuRef={menuRef}
@@ -1202,10 +1545,20 @@ const MasterDataManagement = ({ token, onLogout }) => {
         >
           <form id="master-form" className="modal-form" onSubmit={submitForm}>
             <div className="form-grid">
-              {activeModule.fields.map((field) => (
+              {activeModule.fields.map((field) => {
+                const effectiveField = field.requiredOnCreate
+                  ? {
+                      ...field,
+                      required: !activeState.editingRecord,
+                      placeholder: activeState.editingRecord
+                        ? field.editPlaceholder || field.placeholder
+                        : field.placeholder,
+                    }
+                  : field;
+                return (
                 <FormField
                   key={field.key}
-                  field={field}
+                  field={effectiveField}
                   value={activeState.formValues[field.key]}
                   error={activeState.fieldErrors[field.key]}
                   onChange={handleFieldChange}
@@ -1218,7 +1571,8 @@ const MasterDataManagement = ({ token, onLogout }) => {
                       : []
                   }
                 />
-              ))}
+                );
+              })}
             </div>
           </form>
         </MasterModal>
@@ -1306,6 +1660,54 @@ const MasterDataManagement = ({ token, onLogout }) => {
         </MasterModal>
       ) : null}
 
+      {profileDialog.open ? (
+        <MasterModal
+          title="My Profile"
+          description="Your display name and the timezone used to show dates and times to you."
+          onClose={closeProfileDialog}
+          footer={
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={closeProfileDialog}>
+                Cancel
+              </button>
+              <button type="button" className="master-button master-button-primary" onClick={saveProfile} disabled={profileDialog.saving}>
+                {profileDialog.saving ? 'Saving...' : 'Save'}
+              </button>
+            </>
+          }
+        >
+          <div className="modal-form">
+            {profileDialog.error ? <div className="status-banner status-banner-error">{profileDialog.error}</div> : null}
+            <div className="form-grid">
+              <div className="form-field">
+                <label>Username</label>
+                <input type="text" value={currentUser?.username || ''} readOnly disabled />
+              </div>
+              <div className="form-field">
+                <label>Full Name</label>
+                <input
+                  type="text"
+                  value={profileDialog.values.full_name}
+                  onChange={(e) => setProfileDialog((previous) => ({ ...previous, values: { ...previous.values, full_name: e.target.value } }))}
+                  placeholder="Optional full name"
+                />
+              </div>
+              <div className="form-field">
+                <label>Timezone</label>
+                <select
+                  value={profileDialog.values.timezone}
+                  onChange={(e) => setProfileDialog((previous) => ({ ...previous, values: { ...previous.values, timezone: e.target.value } }))}
+                >
+                  {listTimezones().map((tz) => (
+                    <option key={tz} value={tz}>{tz}</option>
+                  ))}
+                </select>
+              </div>
+            </div>
+          </div>
+        </MasterModal>
+      ) : null}
+
       {pricingDialog.open ? (
         <MasterModal
           title="Set Price"
@@ -1338,6 +1740,62 @@ const MasterDataManagement = ({ token, onLogout }) => {
                 <input type="text" readOnly value={formatNumber(calculateSellingPriceFromValues(pricingDialog.values))} />
               </div>
             </div>
+          </div>
+        </MasterModal>
+      ) : null}
+
+      {tiersDialog.open ? (
+        <MasterModal
+          size="wide"
+          title="Quantity Pricing"
+          description={tiersDialog.record ? `Set the price for each quantity range of ${tiersDialog.record.name}.` : 'Set quantity-based pricing.'}
+          onClose={closeTiersDialog}
+          footer={
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={closeTiersDialog}>
+                Cancel
+              </button>
+              <button type="button" className="master-button master-button-primary" onClick={saveTiers} disabled={tiersDialog.saving || tiersDialog.loading}>
+                {tiersDialog.saving ? 'Saving...' : 'Save Pricing Tiers'}
+              </button>
+            </>
+          }
+        >
+          <div className="modal-form">
+            {tiersDialog.error ? <div className="status-banner status-banner-error">{tiersDialog.error}</div> : null}
+            {tiersDialog.loading ? (
+              <div>Loading pricing tiers...</div>
+            ) : (
+              <>
+                <p className="field-hint">
+                  Leave this empty to always use the product's flat selling price. Add a row for every quantity break -
+                  e.g. 1+ at 10.00, 10+ at 9.00, 50+ at 8.00.
+                </p>
+                <table className="procurement-items-table">
+                  <thead>
+                    <tr>
+                      <th>From Quantity</th>
+                      <th>Unit Price</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {tiersDialog.tiers.map((tier, index) => (
+                      <tr key={index}>
+                        <td><input type="number" min="0.01" step="0.01" value={tier.min_quantity} onChange={(e) => updateTierRow(index, 'min_quantity', e.target.value)} /></td>
+                        <td><input type="number" min="0" step="0.01" value={tier.unit_price} onChange={(e) => updateTierRow(index, 'unit_price', e.target.value)} /></td>
+                        <td>
+                          <button type="button" className="item-remove-btn" onClick={() => removeTierRow(index)} title="Remove tier">
+                            <TrashIcon className="menu-icon" />
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <AppButton variant="secondary" onClick={addTierRow} style={{ marginTop: '12px' }}>Add Quantity Range</AppButton>
+              </>
+            )}
           </div>
         </MasterModal>
       ) : null}

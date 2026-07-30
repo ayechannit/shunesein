@@ -1,0 +1,84 @@
+Reports Inventory & Gap Analysis — Shunesein / Ma Cherry
+
+I pulled the contracted scope from the original quotation PDF (Module 1 – Dashboard, Module 19 – Detailed Reports) and cross-referenced it against every report-related controller, route, and frontend page in the codebase. Here's the full picture.
+
+1. What the contract promises
+
+Module 1 – Dashboard: daily sales, purchases, production output, cash/bank balances, outstanding supplier/customer balances, low-stock alerts, best-selling products, monthly sales/expense charts.
+
+Module 19 – Detailed Reports: Current Stock, Stock Ledger, Stock Movement, Low Stock, Purchase Summary, Daily/Monthly Production, Sales Summary, Customer/Supplier Outstanding, Profit & Loss.
+
+2. What actually exists today
+
+#: 1
+Report: Current Stock
+Backend Endpoint: GET /api/reports/current-stock
+Frontend UI: None
+Status: Backend only — orphaned
+────────────────────────────────────────
+#: 2
+Report: Low Stock
+Backend Endpoint: GET /api/reports/low-stock
+Frontend UI: None
+Status: Backend only — orphaned
+────────────────────────────────────────
+#: 3
+Report: Sales Summary
+Backend Endpoint: GET /api/reports/sales-summary
+Frontend UI: None
+Status: Backend only, and thin: just SUM(total_amount) + count for a date range — no breakdown by product/customer/salesperson
+────────────────────────────────────────
+#: 4
+Report: Profit & Loss
+Backend Endpoint: GET /api/reports/profit-loss
+Frontend UI: None
+Status: Backend only, and methodologically wrong — treats SUM(purchase_vouchers.total_amount) in the period as "COGS." That's raw material
+purchases, not cost of goods sold; it ignores inventory valuation, production cost, and operating expenses (income_expense_entries) entirely.
+ Would misstate gross profit.
+────────────────────────────────────────
+#: 5
+Report: Stock Ledger
+Backend Endpoint: GET /api/stock-ledger/balance-at-date
+Frontend UI: None
+Status: Backend only, and partial — only returns a balance snapshot as of one date, not a transaction-by-transaction ledger (in/out/running
+balance)
+────────────────────────────────────────
+#: 6
+Report: Cash & Bank Book
+Backend Endpoint: GET /api/finance/account-ledger
+Frontend UI: ✅ Finance.jsx (Cash & Bank Book tab)
+Status: Fully delivered — per-account running ledger already live
+────────────────────────────────────────
+#: 7
+Report: Dashboard
+Backend Endpoint: GET /api/misc/dashboard
+Frontend UI: None
+Status: Backend only, and only returns 3 of the 8 promised metrics (today's sales, pending PO count, low-stock item count) — no purchases,
+production output, cash/bank balances, outstanding balances, best-sellers, or charts
+
+Entirely missing (no backend endpoint at all):
+
+┌─────────────────────────────────────┬───────────────────────────────────────────────────────────────────────────────────────────────────┐
+│               Report                │                                    Underlying data available?                                     │
+├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Stock Movement (full transaction    │ Yes — stock_transactions has product_id, warehouse_id, quantity_change, transaction_type,         │
+│ history, not just a balance)        │ reference_id, created_at                                                                          │
+├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Purchase Summary                    │ Yes — purchase_orders / purchase_vouchers                                                         │
+├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Daily/Monthly Production            │ Yes — production_batches + production_raw_materials                                               │
+├─────────────────────────────────────┼───────────────────────────────────────────────────────────────────────────────────────────────────┤
+│ Customer/Supplier Outstanding       │ Partial — outstanding_balance is already a visible column on the Customers/Suppliers master-data  │
+│ (dedicated report/aging)            │ screens, but there's no standalone outstanding/aging report (filterable, totaled,                 │
+│                                     │ printable/exportable)                                                                             │
+└─────────────────────────────────────┴───────────────────────────────────────────────────────────────────────────────────────────────────┘
+
+3. Key findings
+
+- Nothing in Module 19 is reachable by a user. All four existing report endpoints (current-stock, low-stock, sales-summary, profit-loss) plus the dashboard and stock-ledger endpoints are wired with permissions (view_reports, seeded correctly) but have zero frontend consumption — no Reports.jsx, no Dashboard.jsx exist in frontend/src/pages at all, and no fetch call anywhere in the frontend hits any of these routes.
+- Profit & Loss is not just missing UI — the calculation itself needs to be redesigned before it's worth exposing.
+- 4 of 9 contracted reports have no backend at all (Stock Movement, Purchase Summary, Production Summary, Outstanding/Aging), though all their source data already exists cleanly.
+- The Dashboard module (a whole numbered module in the contract) has no page whatsoever — this is likely the single biggest visible gap for the client, since it's the first thing an owner/manager would expect to see after login.
+- The one bright spot: Cash & Bank Book (Module 17) is genuinely done — full ledger, already in the UI.
+
+Given this, I'd suggest we sequence the work rather than build all 9 at once — happy to walk through priority with you before touching code.

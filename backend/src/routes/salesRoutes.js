@@ -22,4 +22,10 @@ router.post('/invoices', verifyToken, guard, salesCtrl.createInvoice);
 router.put('/invoices/:id', verifyToken, guard, salesCtrl.updateInvoice);
 router.delete('/invoices/:id', verifyToken, guard, salesCtrl.deleteInvoice);
 
+// Sales Returns / Credit Notes
+router.get('/returns', verifyToken, salesCtrl.getAllReturns);
+router.get('/returns/:id', verifyToken, salesCtrl.getReturnById);
+router.post('/returns', verifyToken, guard, salesCtrl.createReturn);
+router.delete('/returns/:id', verifyToken, guard, salesCtrl.deleteReturn);
+
 module.exports = router;

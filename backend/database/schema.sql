@@ -115,7 +115,7 @@ CREATE TABLE suppliers (
     phone VARCHAR(50),
     email VARCHAR(100),
     address TEXT,
-    outstanding_balance DECIMAL(15, 2) DEFAULT 0.00,
+    outstanding_balance DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -127,8 +127,8 @@ CREATE TABLE customers (
     phone VARCHAR(50),
     email VARCHAR(100),
     address TEXT,
-    credit_limit DECIMAL(15, 2) DEFAULT 0.00,
-    outstanding_balance DECIMAL(15, 2) DEFAULT 0.00,
+    credit_limit DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
+    outstanding_balance DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -411,7 +411,7 @@ CREATE TABLE accounts (
     account_type VARCHAR(20), -- cash, bank
     account_number VARCHAR(50),
     bank_name VARCHAR(100),
-    balance DECIMAL(15, 2) DEFAULT 0.00,
+    balance DECIMAL(15, 2) NOT NULL DEFAULT 0.00,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
@@ -455,13 +455,20 @@ CREATE TABLE fund_transfers (
 CREATE TABLE deliveries (
     id SERIAL PRIMARY KEY,
     delivery_number VARCHAR(50) UNIQUE NOT NULL,
-    invoice_id INTEGER REFERENCES sales_invoices(id),
     date DATE DEFAULT CURRENT_DATE,
     vehicle_info VARCHAR(100),
     driver_name VARCHAR(100),
     status VARCHAR(20) DEFAULT 'pending', -- pending, shipped, delivered, failed
     remark TEXT,
     created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- A delivery (one truck run) can cover multiple sales invoices.
+CREATE TABLE delivery_invoices (
+    id SERIAL PRIMARY KEY,
+    delivery_id INTEGER NOT NULL REFERENCES deliveries(id) ON DELETE CASCADE,
+    invoice_id INTEGER NOT NULL REFERENCES sales_invoices(id),
+    UNIQUE (delivery_id, invoice_id)
 );
 
 CREATE TABLE audit_logs (

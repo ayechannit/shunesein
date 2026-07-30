@@ -176,7 +176,11 @@ button, input, select, textarea { font: inherit; }
   gap: 4px;
   transition: max-height 220ms ease, opacity 220ms ease;
 }
-.nav-group-body.is-open { max-height: 900px; opacity: 1; }
+/* Large enough to never clip a long section (e.g. Reports, which now runs to
+   dozens of items) - a capped max-height shorter than the content silently
+   crops the section instead of growing it, making the last visible item look
+   like it overlaps whatever section comes next. */
+.nav-group-body.is-open { max-height: 4000px; opacity: 1; }
 
 .nav-item {
   display: flex;
@@ -235,6 +239,16 @@ button, input, select, textarea { font: inherit; }
 }
 .profile-card strong { display: block; font-size: 14px; }
 .profile-card span { display: block; font-size: 12px; color: var(--md-muted); }
+
+.profile-card-button {
+  width: 100%;
+  font: inherit;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+.profile-card-button:hover:not(:disabled) { background: var(--md-surface-hover, var(--md-border)); }
+.profile-card-button:disabled { cursor: default; }
 
 .avatar {
   width: 36px; height: 36px;
@@ -515,10 +529,122 @@ button, input, select, textarea { font: inherit; }
   background: var(--md-primary-soft);
   color: var(--md-primary);
 }
+.kpi-icon-success { background: var(--md-success-soft); color: var(--md-success); }
+.kpi-icon-warning { background: var(--md-warning-soft); color: var(--md-warning); }
+.kpi-icon-danger { background: var(--md-danger-soft); color: var(--md-danger); }
+.kpi-icon-info { background: var(--md-info-soft); color: var(--md-info); }
 
 .kpi-copy span { display: block; font-size: 12px; font-weight: 600; color: var(--md-muted); }
 .kpi-copy strong { display: block; margin: 2px 0 2px; font-size: 28px; line-height: 1; letter-spacing: -0.04em; }
 .kpi-copy small { display: block; font-size: 12px; color: var(--md-muted); }
+
+/* ─── Dashboard ─── */
+.dashboard-columns {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 20px;
+  align-items: start;
+}
+
+.dashboard-chart-legend {
+  display: flex;
+  gap: 20px;
+  margin-bottom: 16px;
+  font-size: 13px;
+  color: var(--md-muted);
+}
+.dashboard-chart-legend-item { display: flex; align-items: center; gap: 6px; }
+.dashboard-chart-swatch { width: 10px; height: 10px; border-radius: 3px; display: inline-block; }
+.dashboard-chart-swatch-sales { background: var(--md-primary); }
+.dashboard-chart-swatch-expenses { background: var(--md-warning); }
+
+.dashboard-chart-bars {
+  display: flex;
+  align-items: flex-end;
+  gap: 12px;
+  height: 220px;
+  padding: 0 4px;
+}
+
+.dashboard-chart-column {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 8px;
+  height: 100%;
+}
+
+.dashboard-chart-bar-pair {
+  flex: 1;
+  width: 100%;
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  gap: 5px;
+}
+
+.dashboard-chart-bar {
+  flex: 1;
+  max-width: 28px;
+  border-radius: 4px 4px 0 0;
+  min-height: 2px;
+  transition: height 260ms ease;
+}
+.dashboard-chart-bar-sales { background: var(--md-primary); }
+.dashboard-chart-bar-expenses { background: var(--md-warning); }
+
+.dashboard-chart-month-label {
+  font-size: 12px;
+  color: var(--md-muted);
+  white-space: nowrap;
+}
+
+.dashboard-chart-swatch-cash-in { background: var(--md-success); }
+.dashboard-chart-swatch-cash-out { background: var(--md-danger); }
+.dashboard-chart-bar-cash-in { background: var(--md-success); }
+.dashboard-chart-bar-cash-out { background: var(--md-danger); }
+
+/* Horizontal bar list - AR/AP aging buckets, stock value by category */
+.dashboard-hbar-list {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+.dashboard-hbar-row {
+  display: grid;
+  grid-template-columns: 96px 1fr 90px;
+  align-items: center;
+  gap: 10px;
+  font-size: 13px;
+}
+.dashboard-hbar-label {
+  color: var(--md-muted);
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.dashboard-hbar-track {
+  height: 10px;
+  border-radius: 5px;
+  background: var(--md-border);
+  overflow: hidden;
+}
+.dashboard-hbar-fill {
+  height: 100%;
+  border-radius: 5px;
+  min-width: 2px;
+  transition: width 260ms ease;
+}
+.dashboard-hbar-fill-accent { background: var(--md-primary); }
+.dashboard-hbar-fill-warning { background: var(--md-warning); }
+.dashboard-hbar-fill-danger { background: var(--md-danger); }
+.dashboard-hbar-value {
+  text-align: right;
+  font-variant-numeric: tabular-nums;
+  color: var(--md-text);
+  font-weight: 600;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    TABLE SECTION
@@ -624,6 +750,12 @@ tbody tr:last-child td { border-bottom: none; }
 .row-menu-trigger:hover { background: #f3f4f6; border-color: var(--md-border); }
 
 /* ─── Dropdown Menu ─── */
+/* This wrapper is always position: fixed, viewport-relative, regardless of
+   whether it's portaled into document.body directly or into a modal's own
+   .modal-dropdown-layer - that layer is itself `position: fixed; inset: 0`,
+   so nesting one fixed box inside another still resolves against the
+   viewport (position: fixed only re-anchors to an ancestor with a
+   transform/filter/perspective, not merely to another fixed ancestor). */
 .dropdown-menu-portal {
   position: fixed;
   inset: 0;
@@ -664,8 +796,85 @@ tbody tr:last-child td { border-bottom: none; }
 }
 .dropdown-menu-item:hover { background: #f3f4f6; }
 .dropdown-menu-item.danger { color: var(--md-danger); }
+.dropdown-menu-item.active { background: #eff6ff; color: var(--md-primary); font-weight: 600; }
 
 .menu-icon { width: 15px; height: 15px; }
+
+/* ─── Searchable Select ─── */
+.searchable-select-trigger {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  width: 100%;
+  /* Safety net: width: 100% against an auto-sized parent (a plain flex/grid
+     item with no explicit width of its own) is a shrink-to-fit ambiguity -
+     browsers effectively treat a 100%-wide child as contributing no
+     intrinsic size, so the parent (and this trigger) can collapse to just
+     its non-searchable-select content. This floor keeps every instance
+     usable even if a page forgets to size its wrapper explicitly. */
+  min-width: 160px;
+  height: 38px;
+  padding: 0 10px;
+  border: 1px solid var(--md-border);
+  border-radius: 10px;
+  background: #fff;
+  color: var(--md-text);
+  font-size: 14px;
+  cursor: pointer;
+  text-align: left;
+}
+.searchable-select-trigger:disabled { cursor: not-allowed; opacity: 0.6; }
+.searchable-select-trigger:focus { outline: none; border-color: #93c5fd; box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12); }
+/* min-width: 0 is required for the ellipsis truncation to actually take
+   effect - a flex item's default min-width is auto (its content size), so
+   without this it would refuse to shrink below the full product name and
+   silently ignore text-overflow, in any narrow column, not just on mobile. */
+.searchable-select-value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.searchable-select-placeholder { min-width: 0; color: var(--md-muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.searchable-select-chevron { width: 14px; height: 14px; flex-shrink: 0; color: var(--md-muted); }
+
+.searchable-select-panel {
+  /* Width is set inline to match the trigger exactly (matchTriggerWidth) -
+     overriding .dropdown-menu's own min-width, which would otherwise still
+     clamp this wider than the trigger regardless of the inline width. */
+  min-width: 0;
+  max-width: none;
+  padding: 8px;
+}
+
+.searchable-select-search {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 8px;
+  margin-bottom: 6px;
+  border: 1px solid var(--md-border);
+  border-radius: 8px;
+  background: var(--md-bg);
+}
+.searchable-select-search-icon { width: 14px; height: 14px; color: var(--md-muted); flex-shrink: 0; }
+.searchable-select-search input {
+  flex: 1;
+  border: 0;
+  outline: none;
+  background: transparent;
+  font-size: 13px;
+  color: var(--md-text);
+}
+
+.searchable-select-options {
+  display: grid;
+  gap: 2px;
+  max-height: 280px;
+  overflow-y: auto;
+}
+
+.searchable-select-empty {
+  padding: 10px 12px;
+  font-size: 13px;
+  color: var(--md-muted);
+}
 
 /* ─── Skeleton ─── */
 .skeleton-row td { padding: 14px 16px; }
@@ -790,6 +999,19 @@ tbody tr:last-child td { border-bottom: none; }
   border-radius: var(--md-radius-xl);
   box-shadow: 0 20px 60px rgba(15, 23, 42, 0.15);
   animation: modalEnter 180ms ease;
+}
+
+/* Portaled to document.body as a sibling of modal-backdrop (not nested
+   inside it), so it's unambiguously viewport-fixed and never subject to
+   modal-card's `overflow: clip`. Empty and click-through by default; only
+   the actual dropdown panel rendered inside it is interactive. Higher
+   z-index than .modal-backdrop so anything portaled here always stacks
+   above the modal, regardless of DOM/mount order. */
+.modal-dropdown-layer {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  pointer-events: none;
 }
 
 .modal-wide {

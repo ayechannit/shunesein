@@ -96,6 +96,31 @@ export const deletePurchaseVoucher = async (token, id) =>
     method: 'DELETE',
   });
 
+// Purchase Returns / Debit Notes
+export const fetchPurchaseReturns = async (token, params = {}) => {
+  const query = new URLSearchParams({
+    page: '1',
+    limit: '20',
+    ...params,
+  });
+  return buildRequest(`${API_ROOT}/procurement/returns?${query.toString()}`, token);
+};
+
+export const fetchPurchaseReturnById = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/returns/${id}`, token);
+
+export const createPurchaseReturn = async (token, payload) =>
+  buildRequest(`${API_ROOT}/procurement/returns`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+export const deletePurchaseReturn = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/returns/${id}`, token, {
+    method: 'DELETE',
+  });
+
 // Lookups
 export const fetchProducts = async (token) => {
   const response = await buildRequest(`${API_ROOT}/master/products?page=1&limit=1000&search=&sortBy=name&order=ASC`, token);

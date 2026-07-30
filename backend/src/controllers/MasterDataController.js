@@ -41,6 +41,21 @@ const exportExcludedColumns = {
   users: ['password_hash'],
 };
 
+// Balance-like numeric columns that must never become NULL from a blank CSV
+// cell - they default to 0.00 in the schema, but that default only applies
+// when the column is omitted entirely, not when it's explicitly set to NULL
+// (which a blank CSV cell does). A NULL balance is worse than just wrong: any
+// later `balance = balance + $1` increment (payments, fund transfers, etc.)
+// stays NULL forever, since NULL + anything is NULL in SQL - this silently
+// breaks that record's balance tracking until someone notices and manually
+// fixes it directly in the database.
+const importZeroDefaultColumns = {
+  suppliers: ['outstanding_balance'],
+  customers: ['outstanding_balance', 'credit_limit'],
+  accounts: ['balance'],
+  products: ['cost_price', 'markup_value', 'selling_price', 'min_stock_level'],
+};
+
 /**
  * Generic Controller for Master Data CRUD
  * Supports Search, Pagination, Sorting, Export, and Import
@@ -335,6 +350,7 @@ class MasterDataController {
 
           const hasIdColumn = validColumns.includes('id');
           const protectedOnUpdate = importProtectedOnUpdateColumns[this.tableName] || [];
+          const zeroDefaultColumns = importZeroDefaultColumns[this.tableName] || [];
 
           const result = await db.withTransaction(async (client) => {
             let created = 0;
@@ -349,7 +365,11 @@ class MasterDataController {
 
               const rawPayload = {};
               rowColumns.forEach((column) => {
-                rawPayload[column] = row[column] === '' ? null : row[column];
+                if (row[column] === '') {
+                  rawPayload[column] = zeroDefaultColumns.includes(column) ? '0' : null;
+                } else {
+                  rawPayload[column] = row[column];
+                }
               });
               // Recompute selling_price from cost/markup the same way the single-record
               // API does, so a bulk price edit via CSV behaves identically to the UI.

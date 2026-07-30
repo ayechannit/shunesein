@@ -20,16 +20,11 @@ import {
   updateDeliveryStatus,
   fetchSalesInvoices,
 } from '../services/deliveryService';
+import { formatDate, todayLocal as today } from '../utils/datetime';
 
 const PAGE_SIZES = [5, 10, 20, 50];
 
-const formatDate = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString();
-};
-
-const emptyForm = () => ({ delivery_number: '', invoice_id: '', date: '', vehicle_info: '', driver_name: '', remark: '' });
+const emptyForm = () => ({ delivery_number: '', invoice_ids: [], date: today(), vehicle_info: '', driver_name: '', remark: '' });
 
 const NEXT_STATUS_ACTIONS = {
   pending: [{ status: 'shipped', label: 'Mark Shipped' }, { status: 'failed', label: 'Mark Failed' }],
@@ -53,6 +48,7 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [menuOpenId, setMenuOpenId] = useState(null);
+  const [invoicePickerFilter, setInvoicePickerFilter] = useState('');
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -101,14 +97,27 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
   const openCreate = () => {
     setFormValues(emptyForm());
     setFormErrors({});
+    setInvoicePickerFilter('');
     setFormOpen(true);
   };
 
   const closeForm = () => { setFormOpen(false); load(); };
 
+  const toggleInvoice = (invoiceId) => {
+    setFormValues((prev) => {
+      const exists = prev.invoice_ids.includes(invoiceId);
+      return {
+        ...prev,
+        invoice_ids: exists ? prev.invoice_ids.filter((id) => id !== invoiceId) : [...prev.invoice_ids, invoiceId],
+      };
+    });
+  };
+
   const submitForm = async () => {
     const errors = {};
-    if (!formValues.invoice_id) errors.invoice_id = 'Sales invoice is required.';
+    if (!formValues.invoice_ids || formValues.invoice_ids.length === 0) {
+      errors.invoice_ids = 'Select at least one sales invoice.';
+    }
     if (Object.keys(errors).length > 0) {
       setFormErrors(errors);
       return;
@@ -118,7 +127,7 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
     try {
       await createDelivery(token, {
         delivery_number: formValues.delivery_number || `DEL-${Date.now()}`,
-        invoice_id: Number(formValues.invoice_id),
+        invoice_ids: formValues.invoice_ids,
         date: formValues.date || new Date().toISOString().slice(0, 10),
         vehicle_info: formValues.vehicle_info,
         driver_name: formValues.driver_name,
@@ -149,7 +158,7 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
 
   const columns = [
     { key: 'delivery_number', label: 'Delivery Number', sortable: true },
-    { key: 'invoice_number', label: 'Invoice' },
+    { key: 'invoice_numbers', label: 'Invoices' },
     { key: 'date', label: 'Date', sortable: true },
     { key: 'vehicle_info', label: 'Vehicle' },
     { key: 'driver_name', label: 'Driver' },
@@ -159,6 +168,18 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
   const renderCell = (row, column) => {
     if (column.key === 'status') return <StatusBadge value={row.status} />;
     if (column.key === 'date') return formatDate(row.date);
+    if (column.key === 'invoice_numbers') {
+      const value = row.invoice_numbers || '';
+      if (!value) return '-';
+      return (
+        <span
+          title={value}
+          style={{ display: 'inline-block', maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', verticalAlign: 'bottom' }}
+        >
+          {value}
+        </span>
+      );
+    }
     return row[column.key] ?? '-';
   };
 
@@ -256,12 +277,57 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
                 <input type="date" value={formValues.date} onChange={(e) => setFormValues((p) => ({ ...p, date: e.target.value }))} />
               </div>
               <div className="form-field form-field-full">
-                <label>Sales Invoice *</label>
-                <select value={formValues.invoice_id} onChange={(e) => setFormValues((p) => ({ ...p, invoice_id: e.target.value }))}>
-                  <option value="">Select invoice</option>
-                  {invoices.map((inv) => <option key={inv.id} value={inv.id}>{inv.invoice_number} - {inv.customer_name}</option>)}
-                </select>
-                {formErrors.invoice_id ? <div className="field-error">{formErrors.invoice_id}</div> : null}
+                <label>Sales Invoices * {formValues.invoice_ids.length > 0 ? `(${formValues.invoice_ids.length} selected)` : ''}</label>
+                <input
+                  type="text"
+                  value={invoicePickerFilter}
+                  onChange={(e) => setInvoicePickerFilter(e.target.value)}
+                  placeholder="Search invoice number or customer..."
+                  style={{ marginBottom: '8px' }}
+                />
+                <div
+                  style={{
+                    maxHeight: '220px',
+                    overflowY: 'auto',
+                    border: '1px solid var(--md-border-strong)',
+                    borderRadius: '8px',
+                  }}
+                >
+                  {invoices
+                    .filter((inv) => {
+                      const term = invoicePickerFilter.trim().toLowerCase();
+                      if (!term) return true;
+                      return (
+                        (inv.invoice_number || '').toLowerCase().includes(term) ||
+                        (inv.customer_name || '').toLowerCase().includes(term)
+                      );
+                    })
+                    .map((inv) => (
+                      <label
+                        key={inv.id}
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '8px',
+                          padding: '8px 10px',
+                          borderBottom: '1px solid var(--md-border)',
+                          cursor: 'pointer',
+                          fontSize: '13px',
+                        }}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={formValues.invoice_ids.includes(inv.id)}
+                          onChange={() => toggleInvoice(inv.id)}
+                        />
+                        <span>{inv.invoice_number} - {inv.customer_name || '-'}</span>
+                      </label>
+                    ))}
+                  {invoices.length === 0 ? (
+                    <div style={{ padding: '10px', color: 'var(--md-muted)', fontSize: '13px' }}>No sales invoices available.</div>
+                  ) : null}
+                </div>
+                {formErrors.invoice_ids ? <div className="field-error">{formErrors.invoice_ids}</div> : null}
               </div>
               <div className="form-field">
                 <label>Vehicle</label>

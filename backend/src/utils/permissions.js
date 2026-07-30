@@ -13,5 +13,7 @@ module.exports = {
   MANAGE_DELIVERY: 'manage_delivery',
   MANAGE_SETTINGS: 'manage_settings',
   VIEW_REPORTS: 'view_reports',
+  VIEW_FINANCIAL_REPORTS: 'view_financial_reports',
   VIEW_AUDIT_LOG: 'view_audit_log',
+  MANAGE_PRICE_LISTS: 'manage_price_lists',
 };

@@ -22,6 +22,7 @@ import {
   PrinterIcon,
   StatTile,
   ProgressMeter,
+  SearchableSelect,
 } from '../components/masterData/MasterDataPrimitives';
 import {
   fetchSaleOrders,
@@ -31,6 +32,7 @@ import {
   fetchProducts,
   fetchCustomers,
   fetchWarehouses,
+  fetchSuggestedPrice,
   createSaleOrder,
   updateSaleOrder,
   deleteSaleOrder,
@@ -45,23 +47,17 @@ import {
   fetchPayments,
   deletePayment,
   logPrintAction,
+  fetchSalesReturns,
+  fetchSalesReturnById,
+  createSalesReturn,
+  deleteSalesReturn,
 } from '../services/salesService';
-import { fetchSettings } from '../services/settingsService';
+import { fetchPrintPageSetups, toPageSettings } from '../services/printSetupService';
+import { fetchUsersForFilter } from '../services/auditService';
 import { openPrintDocument } from '../utils/printDocument';
+import { formatDate, formatDateTime, todayLocal as today } from '../utils/datetime';
 
 const PAGE_SIZES = [5, 10, 20, 50];
-
-const formatDate = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString();
-};
-
-const formatDateTime = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
-};
 
 const formatNumber = (value) => {
   if (value === null || value === undefined || value === '') return '-';
@@ -73,22 +69,351 @@ const formatNumber = (value) => {
 const emptyOrderForm = () => ({
   so_number: '',
   customer_id: '',
-  order_date: '',
+  salesperson_id: '',
+  order_date: today(),
   remark: '',
-  items: [{ product_id: '', quantity: '1', unit_price: '0' }],
+  items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }],
 });
 
 const emptyInvoiceForm = () => ({
   invoice_number: '',
   so_id: '',
   customer_id: '',
+  salesperson_id: '',
   warehouse_id: '',
-  invoice_date: '',
+  invoice_date: today(),
   remark: '',
   discount_amount: '0',
   tax_amount: '0',
+  items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }],
+});
+
+const emptyReturnForm = () => ({
+  return_number: '',
+  customer_id: '',
+  warehouse_id: '',
+  return_date: today(),
+  reason: '',
   items: [{ product_id: '', quantity: '1', unit_price: '0' }],
 });
+
+// ─────────────────────────── Sales Returns / Credit Notes ───────────────────────────
+// A deliberately standalone tab - recording a return has no status workflow
+// (unlike orders/invoices), so it doesn't share the isOrder-ternary state
+// the rest of this file is built around. See PurchaseReturnsTab in
+// Procurement.jsx for the mirror image of this on the purchasing side.
+const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, products }) => {
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [formOpen, setFormOpen] = useState(false);
+  const [formValues, setFormValues] = useState(emptyReturnForm());
+  const [formErrors, setFormErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [viewRecord, setViewRecord] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const menuRef = useRef(null);
+
+  const productOptions = useMemo(() => products.map((p) => ({ value: String(p.id), label: p.name })), [products]);
+
+  const load = async () => {
+    setLoading(true);
+    setListError('');
+    try {
+      const response = await fetchSalesReturns(token, { page, limit: pageSize, search });
+      setRows(response.data || []);
+      setTotal(Number(response.total || 0));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load sales returns');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [token, page, pageSize]);
+
+  useEffect(() => {
+    const handleOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpenId(null);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const updateItem = (index, key, value) => {
+    const nextItems = [...formValues.items];
+    nextItems[index] = { ...nextItems[index], [key]: value };
+    setFormValues((previous) => ({ ...previous, items: nextItems }));
+  };
+  const addItem = () => setFormValues((previous) => ({ ...previous, items: [...previous.items, { product_id: '', quantity: '1', unit_price: '0' }] }));
+  const removeItem = (index) => setFormValues((previous) => ({ ...previous, items: previous.items.filter((_, i) => i !== index) }));
+
+  const summaryTotal = (formValues.items || []).reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0);
+
+  const openCreate = () => {
+    setFormValues(emptyReturnForm());
+    setFormErrors({});
+    setFormOpen(true);
+  };
+
+  const submitForm = async () => {
+    const nextErrors = {};
+    if (!formValues.customer_id) nextErrors.customer_id = 'Customer is required.';
+    if (!formValues.warehouse_id) nextErrors.warehouse_id = 'Warehouse is required.';
+    if (!formValues.items || formValues.items.length === 0) nextErrors.items = 'At least one item is required.';
+    (formValues.items || []).forEach((item, index) => {
+      if (!item.product_id) nextErrors[`item-product-${index}`] = 'Product is required.';
+      if (!item.quantity || Number(item.quantity) <= 0) nextErrors[`item-quantity-${index}`] = 'Quantity must be greater than 0.';
+      if (!item.unit_price || Number(item.unit_price) <= 0) nextErrors[`item-price-${index}`] = 'Price must be greater than 0.';
+    });
+    if (Object.keys(nextErrors).length > 0) {
+      setFormErrors(nextErrors);
+      return;
+    }
+
+    setSaving(true);
+    setSuccess('');
+    setListError('');
+    try {
+      const payload = {
+        ...formValues,
+        return_number: formValues.return_number || `SR-${Date.now()}`,
+        return_date: formValues.return_date || new Date().toISOString().slice(0, 10),
+        customer_id: Number(formValues.customer_id),
+        warehouse_id: Number(formValues.warehouse_id),
+        items: formValues.items.map((item) => ({
+          ...item,
+          product_id: Number(item.product_id),
+          quantity: Number(item.quantity),
+          unit_price: Number(item.unit_price),
+        })),
+      };
+      await createSalesReturn(token, payload);
+      setSuccess('Sales return recorded.');
+      setFormOpen(false);
+      setFormValues(emptyReturnForm());
+      setPage(1);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setFormErrors({ submit: error.message || 'Unable to record return' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleView = async (row) => {
+    setMenuOpenId(null);
+    try {
+      setViewRecord(await fetchSalesReturnById(token, row.id));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load return detail');
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    setSaving(true);
+    setDeleteError('');
+    try {
+      await deleteSalesReturn(token, deleteTarget.id);
+      setSuccess('Sales return deleted.');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setDeleteError(error.message || 'Unable to delete return');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const columns = [
+    { key: 'return_number', label: 'Return Number' },
+    { key: 'customer_name', label: 'Customer' },
+    { key: 'warehouse_name', label: 'Warehouse' },
+    { key: 'return_date', label: 'Return Date' },
+    { key: 'total_amount', label: 'Total Amount', align: 'right' },
+  ];
+
+  const renderCell = (row, column) => {
+    if (column.key === 'return_date') return formatDate(row.return_date);
+    if (column.key === 'total_amount') return formatNumber(row.total_amount);
+    return row[column.key] ?? '-';
+  };
+
+  const content = (
+    <div className="procurement-shell">
+      {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Sales', 'Sales Returns']} title="Sales Returns" description="Record customer returns - stock comes back in, and what they owe drops." actions={null} /> : null}
+      {success ? <div className="status-banner status-banner-success status-banner-autodismiss" style={{ marginBottom: '1rem' }}>{success}</div> : null}
+      {listError ? <div className="status-banner status-banner-error" style={{ marginBottom: '1rem' }}>{listError}</div> : null}
+
+      <div className="procurement-toolbar">
+        <SearchToolbar
+          searchValue={search}
+          onSearchValueChange={setSearch}
+          onSubmit={() => { setPage(1); load(); }}
+          onReset={() => { setSearch(''); setPage(1); }}
+          sortValue="id-desc"
+          onSortChange={() => {}}
+          sortOptions={[{ value: 'id-desc', label: 'Newest First' }]}
+          extraActions={(
+            <>
+              <AppButton variant="secondary" onClick={load} iconLeft={<RefreshIcon className="button-icon" />}>Refresh</AppButton>
+              <AppButton variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="button-icon" />}>New Return</AppButton>
+            </>
+          )}
+        />
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        renderRowActions={(row) => (
+          <div className="dropdown-menu-list">
+            <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
+            <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button>
+          </div>
+        )}
+        menuOpenId={menuOpenId}
+        onToggleMenu={setMenuOpenId}
+        menuRef={menuRef}
+        emptyState={<EmptyState title="No sales returns" description="Nothing has been returned yet." actionLabel="New Return" onAction={openCreate} />}
+        renderCell={renderCell}
+      />
+      <Pagination
+        page={page}
+        totalPages={Math.max(1, Math.ceil(total / pageSize))}
+        totalItems={total}
+        pageSize={pageSize}
+        pageSizeOptions={PAGE_SIZES}
+        onPageSizeChange={(v) => { setPage(1); setPageSize(v); }}
+        onPrev={() => setPage(Math.max(1, page - 1))}
+        onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))}
+      />
+
+      {formOpen ? (
+        <MasterModal
+          size="wide"
+          title="New Sales Return"
+          description="Record what the customer sent back."
+          onClose={() => setFormOpen(false)}
+          footer={(
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={() => setFormOpen(false)}>Cancel</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save Return'}</button>
+            </>
+          )}
+        >
+          <div className="procurement-shell">
+            {formErrors.submit ? <div className="status-banner status-banner-error">{formErrors.submit}</div> : null}
+            <div className="procurement-grid">
+              <FormField field={{ key: 'customer_id', label: 'Customer', type: 'select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((c) => ({ value: c.id, label: c.name }))} />
+              <FormField field={{ key: 'warehouse_id', label: 'Return-to Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'return_date', label: 'Return Date', type: 'date' }} value={formValues.return_date} error={formErrors.return_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+              <FormField field={{ key: 'reason', label: 'Reason', type: 'textarea' }} value={formValues.reason} error={formErrors.reason} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+            </div>
+
+            <div className="procurement-card">
+              <div className="procurement-toolbar">
+                <strong>Items</strong>
+                <AppButton variant="secondary" onClick={addItem}>Add Item</AppButton>
+              </div>
+              {formErrors.items ? <div className="status-banner status-banner-error">{formErrors.items}</div> : null}
+              <table className="procurement-items-table">
+                <thead><tr><th>Product</th><th>Quantity</th><th>Unit Price</th><th>Subtotal</th><th></th></tr></thead>
+                <tbody>
+                  {(formValues.items || []).map((item, index) => {
+                    const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
+                    return (
+                      <tr key={index}>
+                        <td>
+                          <SearchableSelect
+                            value={item.product_id || ''}
+                            onChange={(newValue) => updateItem(index, 'product_id', newValue)}
+                            options={productOptions}
+                            placeholder="Select product"
+                            searchPlaceholder="Search products..."
+                          />
+                        </td>
+                        <td><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
+                        <td><input type="number" min="0" step="0.01" value={item.unit_price || ''} onChange={(e) => updateItem(index, 'unit_price', e.target.value)} /></td>
+                        <td className="item-subtotal">{formatNumber(subtotal)}</td>
+                        <td>
+                          <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="procurement-summary">
+              <div className="procurement-summary-row"><span>Total</span><strong>{formatNumber(summaryTotal)}</strong></div>
+            </div>
+          </div>
+        </MasterModal>
+      ) : null}
+
+      {viewRecord ? (
+        <MasterModal
+          size="wide"
+          title={`Sales Return: ${viewRecord.return_number}`}
+          description={`Customer: ${viewRecord.customer_name || '-'}`}
+          onClose={() => setViewRecord(null)}
+          footer={<button type="button" className="master-button master-button-secondary" onClick={() => setViewRecord(null)}>Close</button>}
+        >
+          <div className="detail-grid">
+            <div className="detail-item"><span className="detail-label">Warehouse</span><span className="detail-value">{viewRecord.warehouse_name || '-'}</span></div>
+            <div className="detail-item"><span className="detail-label">Return Date</span><span className="detail-value">{formatDate(viewRecord.return_date)}</span></div>
+            <div className="detail-item"><span className="detail-label">Original Invoice</span><span className="detail-value">{viewRecord.invoice_number || '-'}</span></div>
+            <div className="detail-item"><span className="detail-label">Reason</span><span className="detail-value">{viewRecord.reason || '-'}</span></div>
+          </div>
+          <table className="procurement-items-table" style={{ marginTop: '1rem' }}>
+            <thead><tr><th>Product</th><th>Quantity</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+            <tbody>
+              {(viewRecord.items || []).map((item) => (
+                <tr key={item.id}>
+                  <td>{item.product_name || `Product #${item.product_id}`}</td>
+                  <td>{formatNumber(item.quantity)}</td>
+                  <td>{formatNumber(item.unit_price)}</td>
+                  <td className="item-subtotal">{formatNumber(item.subtotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </MasterModal>
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete Sales Return?"
+          description={`Are you sure you want to delete ${deleteTarget.return_number}? This reverses the stock and balance effect. This action cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
+          onConfirm={handleDeleteConfirm}
+          loading={saving}
+          error={deleteError}
+        />
+      ) : null}
+    </div>
+  );
+
+  if (embedded) return content;
+  return <div className="master-shell"><main className="master-content">{content}</main></div>;
+};
 
 const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => {
   const [orders, setOrders] = useState([]);
@@ -110,6 +435,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
   const [products, setProducts] = useState([]);
   const [customers, setCustomers] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
+  const [salespeople, setSalespeople] = useState([]);
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState('create');
   const [formType, setFormType] = useState(defaultTab);
@@ -119,7 +445,9 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [menuOpenId, setMenuOpenId] = useState(null);
-  const [printSettings, setPrintSettings] = useState(null);
+  const [printSetups, setPrintSetups] = useState([]);
+  const [printPickerTarget, setPrintPickerTarget] = useState(null);
+  const [printPickerSetupId, setPrintPickerSetupId] = useState('');
   const [viewRecord, setViewRecord] = useState(null);
   const [viewRecordItems, setViewRecordItems] = useState([]);
   const [viewLoading, setViewLoading] = useState(false);
@@ -144,23 +472,18 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
 
   useEffect(() => {
     let cancelled = false;
-    fetchSettings(token)
-      .then((settings) => {
+    fetchPrintPageSetups(token)
+      .then((setups) => {
         if (cancelled) return;
-        setPrintSettings({
-          marginTop: settings.print_margin_top,
-          marginBottom: settings.print_margin_bottom,
-          marginLeft: settings.print_margin_left,
-          marginRight: settings.print_margin_right,
-          pageWidth: settings.print_page_width,
-          pageHeight: settings.print_page_height,
-        });
+        setPrintSetups(setups);
       })
       .catch(() => {
         // openPrintDocument falls back to sane A4 defaults if this never resolves.
       });
     return () => { cancelled = true; };
   }, [token]);
+
+  const defaultPrintSetup = printSetups.find((s) => s.is_default) || printSetups[0] || null;
 
   useEffect(() => {
     const handleOutside = (event) => {
@@ -175,14 +498,16 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
 
   const loadLookups = async () => {
     try {
-      const [productData, customerData, warehouseData] = await Promise.all([
+      const [productData, customerData, warehouseData, userData] = await Promise.all([
         fetchProducts(token),
         fetchCustomers(token),
         fetchWarehouses(token),
+        fetchUsersForFilter(token),
       ]);
       setProducts(productData);
       setCustomers(customerData);
       setWarehouses(warehouseData);
+      setSalespeople(userData);
     } catch {
       // ignore lookup errors for now
     }
@@ -287,8 +612,36 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
     setFormValues((previous) => ({ ...previous, items: nextItems }));
   };
 
+  // Quantity-tier pricing (see PricingController/product_price_tiers): the
+  // right price for a line depends on both which product and how many, so
+  // this re-suggests whenever either one changes, not just on product pick.
+  const applySuggestedPrice = async (index, productId, quantity) => {
+    if (!productId) return;
+    try {
+      const unitPrice = await fetchSuggestedPrice(token, { product_id: productId, quantity: quantity || 1 });
+      setFormValues((previous) => {
+        const nextItems = [...previous.items];
+        if (!nextItems[index] || nextItems[index].product_id !== productId) return previous;
+        nextItems[index] = { ...nextItems[index], unit_price: String(unitPrice) };
+        return { ...previous, items: nextItems };
+      });
+    } catch {
+      // Leave the current unit price as-is if the lookup fails.
+    }
+  };
+
+  const handleItemProductChange = (index, productId) => {
+    updateItem(index, 'product_id', productId);
+    applySuggestedPrice(index, productId, formValues.items[index]?.quantity);
+  };
+
+  const handleItemQuantityChange = (index, quantity) => {
+    updateItem(index, 'quantity', quantity);
+    applySuggestedPrice(index, formValues.items[index]?.product_id, quantity);
+  };
+
   const addItem = () => {
-    setFormValues((previous) => ({ ...previous, items: [...previous.items, { product_id: '', quantity: '1', unit_price: '0' }] }));
+    setFormValues((previous) => ({ ...previous, items: [...previous.items, { product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }] }));
   };
 
   const removeItem = (index) => {
@@ -342,6 +695,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
           product_id: Number(item.product_id),
           quantity: Number(item.quantity),
           unit_price: Number(item.unit_price),
+          discount_percent: Number(item.discount_percent || 0),
         })),
       };
 
@@ -421,9 +775,10 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
         id: row.id,
         so_number: row.so_number || '',
         customer_id: String(row.customer_id || ''),
-        order_date: row.order_date ? new Date(row.order_date).toISOString().slice(0, 10) : '',
+        salesperson_id: String(row.salesperson_id || ''),
+        order_date: row.order_date ? String(row.order_date).slice(0, 10) : '',
         remark: row.remark || '',
-        items: [{ product_id: '', quantity: '1', unit_price: '0' }],
+        items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }],
       });
       fetchSaleOrderById(token, row.id)
         .then((data) => {
@@ -434,6 +789,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
                 product_id: String(item.product_id),
                 quantity: String(item.quantity),
                 unit_price: String(item.unit_price),
+                discount_percent: String(item.discount_percent || '0'),
               })),
             }));
           }
@@ -445,12 +801,13 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
         invoice_number: row.invoice_number || '',
         so_id: String(row.so_id || ''),
         customer_id: String(row.customer_id || ''),
+        salesperson_id: String(row.salesperson_id || ''),
         warehouse_id: String(row.warehouse_id || ''),
-        invoice_date: row.invoice_date ? new Date(row.invoice_date).toISOString().slice(0, 10) : '',
+        invoice_date: row.invoice_date ? String(row.invoice_date).slice(0, 10) : '',
         remark: row.remark || '',
         discount_amount: String(row.discount_amount || '0'),
         tax_amount: String(row.tax_amount || '0'),
-        items: [{ product_id: '', quantity: '1', unit_price: '0' }],
+        items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }],
       });
       fetchSalesInvoiceById(token, row.id)
         .then((data) => {
@@ -461,6 +818,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
                 product_id: String(item.product_id),
                 quantity: String(item.quantity),
                 unit_price: String(item.unit_price),
+                discount_percent: String(item.discount_percent || '0'),
               })),
             }));
           }
@@ -571,6 +929,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
           product_id: String(item.product_id),
           quantity: String(item.quantity),
           unit_price: String(item.unit_price),
+          discount_percent: String(item.discount_percent || '0'),
         })),
       });
       setFormErrors({});
@@ -588,10 +947,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
     }
   };
 
-  // Print
-  const handlePrint = async (row) => {
+  // Print - uses the given setup if one was explicitly chosen (see the
+  // "Print with Page Setup..." picker), otherwise falls back to whichever
+  // print page setup is marked default.
+  const handlePrint = async (row, setupId) => {
     setMenuOpenId(null);
+    setPrintPickerTarget(null);
     const isOrder = defaultTab === 'orders';
+    const chosenSetup = setupId ? printSetups.find((s) => String(s.id) === String(setupId)) : defaultPrintSetup;
     try {
       const data = isOrder ? await fetchSaleOrderById(token, row.id) : await fetchSalesInvoiceById(token, row.id);
       const documentNumber = isOrder ? data.so_number : data.invoice_number;
@@ -621,7 +984,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
         items,
         totals,
         remark: data.remark,
-        pageSettings: printSettings,
+        pageSettings: toPageSettings(chosenSetup),
       });
 
       if (!opened) {
@@ -666,6 +1029,11 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
         break;
       case 'print':
         handlePrint(row);
+        break;
+      case 'print-with-setup':
+        setMenuOpenId(null);
+        setPrintPickerSetupId(defaultPrintSetup ? String(defaultPrintSetup.id) : '');
+        setPrintPickerTarget(row);
         break;
       default:
         break;
@@ -729,9 +1097,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
     return accumulator;
   }, {}), [products]);
 
+  const productOptions = useMemo(
+    () => products.map((product) => ({ value: String(product.id), label: product.name })),
+    [products]
+  );
+
   const renderForm = () => {
     const isOrder = formType === 'orders';
-    const summaryTotal = (formValues.items || []).reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unit_price || 0)), 0);
+    const summaryTotal = (formValues.items || []).reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unit_price || 0) * (1 - Number(item.discount_percent || 0) / 100)), 0);
     const discount = Number(formValues.discount_amount || 0);
     const tax = Number(formValues.tax_amount || 0);
 
@@ -768,6 +1141,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
               <>
                 <FormField field={{ key: 'so_number', label: 'SO Number', type: 'text', readOnly: true }} value={formValues.so_number || `SO-${Date.now()}`} error={formErrors.so_number} onChange={() => {}} />
                 <FormField field={{ key: 'customer_id', label: 'Customer', type: 'select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((customer) => ({ value: customer.id, label: customer.name }))} />
+                <FormField field={{ key: 'salesperson_id', label: 'Salesperson', type: 'select', placeholder: 'Unassigned' }} value={formValues.salesperson_id} error={formErrors.salesperson_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={salespeople.map((user) => ({ value: user.id, label: user.full_name || user.username }))} />
                 <FormField field={{ key: 'order_date', label: 'Order Date', type: 'date' }} value={formValues.order_date} error={formErrors.order_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               </>
@@ -775,6 +1149,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
               <>
                 <FormField field={{ key: 'invoice_number', label: 'Invoice Number', type: 'text', readOnly: true }} value={formValues.invoice_number || `INV-${Date.now()}`} error={formErrors.invoice_number} onChange={() => {}} />
                 <FormField field={{ key: 'customer_id', label: 'Customer', type: 'select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((customer) => ({ value: customer.id, label: customer.name }))} />
+                <FormField field={{ key: 'salesperson_id', label: 'Salesperson', type: 'select', placeholder: 'Unassigned' }} value={formValues.salesperson_id} error={formErrors.salesperson_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={salespeople.map((user) => ({ value: user.id, label: user.full_name || user.username }))} />
                 <FormField field={{ key: 'warehouse_id', label: 'Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
                 <FormField field={{ key: 'invoice_date', label: 'Invoice Date', type: 'date' }} value={formValues.invoice_date} error={formErrors.invoice_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
@@ -794,6 +1169,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
                   <th>Product</th>
                   <th>Quantity</th>
                   <th>Unit Price</th>
+                  <th>Discount %</th>
                   <th>Subtotal</th>
                   <th></th>
                 </tr>
@@ -801,21 +1177,27 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
               <tbody>
                 {(formValues.items || []).map((item, index) => {
                   const product = selectedProducts[item.product_id];
-                  const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
+                  const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0) * (1 - Number(item.discount_percent || 0) / 100);
                   return (
                     <tr key={`${index}-${item.product_id}`}>
                       <td data-label="Product">
-                        <select value={item.product_id || ''} onChange={(event) => updateItem(index, 'product_id', event.target.value)}>
-                          <option value="">Select product</option>
-                          {products.map((productOption) => <option key={productOption.id} value={productOption.id}>{productOption.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={item.product_id || ''}
+                          onChange={(newValue) => handleItemProductChange(index, newValue)}
+                          options={productOptions}
+                          placeholder="Select product"
+                          searchPlaceholder="Search products..."
+                        />
                         {product ? <div className="field-hint">{product.name}</div> : null}
                       </td>
                       <td data-label="Quantity">
-                        <input type="number" min="1" value={item.quantity || ''} onChange={(event) => updateItem(index, 'quantity', event.target.value)} />
+                        <input type="number" min="1" value={item.quantity || ''} onChange={(event) => handleItemQuantityChange(index, event.target.value)} />
                       </td>
                       <td data-label="Unit Price">
                         <input type="number" min="1" step="0.01" value={item.unit_price || ''} onChange={(event) => updateItem(index, 'unit_price', event.target.value)} />
+                      </td>
+                      <td data-label="Discount %">
+                        <input type="number" min="0" max="100" step="0.01" value={item.discount_percent || '0'} onChange={(event) => updateItem(index, 'discount_percent', event.target.value)} />
                       </td>
                       <td data-label="Subtotal" className="item-subtotal">{formatNumber(subtotal)}</td>
                       <td data-label="">
@@ -1085,6 +1467,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
                       <th>Product</th>
                       <th>Quantity</th>
                       <th>Unit Price</th>
+                      <th>Discount %</th>
                       <th>Subtotal</th>
                     </tr>
                   </thead>
@@ -1094,7 +1477,8 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
                         <td>{item.product_name || item.product_code || `Product #${item.product_id}`}</td>
                         <td>{formatNumber(item.quantity)}</td>
                         <td>{formatNumber(item.unit_price)}</td>
-                        <td>{formatNumber(item.subtotal || (item.quantity * item.unit_price))}</td>
+                        <td>{formatNumber(item.discount_percent || 0)}</td>
+                        <td>{formatNumber(item.subtotal || (item.quantity * item.unit_price * (1 - Number(item.discount_percent || 0) / 100)))}</td>
                       </tr>
                     ))}
                   </tbody>
@@ -1269,6 +1653,12 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
             <span>Print</span>
           </button>
         )}
+        {isInvoiced && (
+          <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print-with-setup', row)}>
+            <PrinterIcon className="menu-icon" />
+            <span>Print with Page Setup...</span>
+          </button>
+        )}
 
         {isPending && (
           <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
@@ -1296,6 +1686,10 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
       <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print', row)}>
         <PrinterIcon className="menu-icon" />
         <span>Print</span>
+      </button>
+      <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print-with-setup', row)}>
+        <PrinterIcon className="menu-icon" />
+        <span>Print with Page Setup...</span>
       </button>
       <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
         <TrashIcon className="menu-icon" />
@@ -1394,6 +1788,10 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
     );
   };
 
+  if (defaultTab === 'returns') {
+    return <SalesReturnsTab token={token} onLogout={onLogout} embedded={embedded} customers={customers} warehouses={warehouses} products={products} />;
+  }
+
   const content = (
     <>
       {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Sales', defaultTab === 'orders' ? 'Sale Orders' : 'Sales Invoices']} title={defaultTab === 'orders' ? 'Sale Orders' : 'Sales Invoices'} description={defaultTab === 'orders' ? 'Manage sale orders and customer assignments.' : 'Manage sales invoices and customer receipts.'} actions={null} /> : null}
@@ -1415,6 +1813,30 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
           loading={saving}
           error={deleteError}
         />
+      ) : null}
+
+      {printPickerTarget ? (
+        <MasterModal
+          size="default"
+          title="Print with Page Setup"
+          description="Choose a page setup for this print job. Defaults to whichever setup is marked default."
+          onClose={() => setPrintPickerTarget(null)}
+          footer={(
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={() => setPrintPickerTarget(null)}>Cancel</button>
+              <button type="button" className="master-button master-button-primary" onClick={() => handlePrint(printPickerTarget, printPickerSetupId)}>Print</button>
+            </>
+          )}
+        >
+          <div className="form-field">
+            <label>Page Setup</label>
+            <select value={printPickerSetupId} onChange={(e) => setPrintPickerSetupId(e.target.value)}>
+              {printSetups.map((setup) => (
+                <option key={setup.id} value={setup.id}>{setup.name}{setup.is_default ? ' (Default)' : ''}</option>
+              ))}
+            </select>
+          </div>
+        </MasterModal>
       ) : null}
     </>
   );

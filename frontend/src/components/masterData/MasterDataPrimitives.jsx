@@ -1,5 +1,24 @@
-import React, { cloneElement, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
+import React, { cloneElement, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+
+// Lets a DropdownMenu opened from inside a modal (a) portal into a stable
+// viewport-covering layer instead of document.body, so it stacks above the
+// modal reliably regardless of DOM order, and (b) clamp/flip its position
+// against the modal card's own measured bounds instead of the full viewport.
+// Value is { cardRef, layerRef } (see MasterModal); null outside any modal.
+// cardRef/layerRef are measured via getBoundingClientRect at position time
+// rather than matched through CSS, since percentage sizing against an
+// auto-sized CSS Grid track is spec-ambiguous and was the actual cause of a
+// previous "dropdown renders misaligned inside the modal" bug.
+const ModalLayerContext = createContext(null);
+
+// Lets any open DropdownMenu tell every other instance to close - so opening
+// one always closes any other (row-action menu or searchable select) already
+// open, without every call site having to lift and coordinate that state itself.
+const dropdownCloseListeners = new Set();
+const closeOtherDropdowns = (exceptId) => {
+  dropdownCloseListeners.forEach((listener) => listener(exceptId));
+};
 
 const ICON_PATHS = {
   dashboard: 'M4 12.5 12 4l8 8.5V20a1 1 0 0 1-1 1h-4v-5H9v5H5a1 1 0 0 1-1-1z',
@@ -111,6 +130,7 @@ export const Sidebar = ({
   onLogout,
   userLabel,
   userRole,
+  onOpenProfile,
   className = '',
   isOpen = true,
   onClose,
@@ -120,8 +140,8 @@ export const Sidebar = ({
       <div className="sidebar-brand">
         <div className="brand-mark">SN</div>
         <div>
-          <strong>Shunesein ERP</strong>
-          <span>Master Data</span>
+          <strong>Shune Sein</strong>
+          <span>ရွှန်းစိန် လက်ဖက်နှင်အကြော်စုံ</span>
         </div>
       </div>
       {onClose ? (
@@ -168,13 +188,19 @@ export const Sidebar = ({
     </nav>
 
     <div className="sidebar-footer">
-      <div className="profile-card">
+      <button
+        type="button"
+        className="profile-card profile-card-button"
+        onClick={onOpenProfile}
+        disabled={!onOpenProfile}
+        aria-label="Edit my profile"
+      >
         <div className="avatar">{(userLabel || 'AD').slice(0, 2).toUpperCase()}</div>
         <div>
           <strong>{userLabel || 'admin'}</strong>
           <span>{userRole || 'Owner'}</span>
         </div>
-      </div>
+      </button>
 
       <button type="button" className="master-button master-button-secondary sidebar-signout" onClick={onLogout}>
         Sign out
@@ -256,13 +282,13 @@ export const KpiCards = ({ items }) => (
   <section className="kpi-grid">
     {items.map((item) => (
       <article key={item.label} className="kpi-card">
-        <div className="kpi-icon" aria-hidden="true">
+        <div className={`kpi-icon ${item.tone ? `kpi-icon-${item.tone}` : ''}`.trim()} aria-hidden="true">
           <AppIcon name={item.icon || 'dashboard'} />
         </div>
         <div className="kpi-copy">
           <span>{item.label}</span>
-          <strong>{item.value}</strong>
-          <small>{item.supportingText}</small>
+          <strong style={item.tone ? { color: `var(--md-${item.tone})` } : undefined}>{item.value}</strong>
+          {item.supportingText ? <small>{item.supportingText}</small> : null}
         </div>
       </article>
     ))}
@@ -368,23 +394,39 @@ export const Pagination = ({
 
 export const MasterModal = ({ title, description, onClose, children, footer, size }) => {
   const modalClass = `modal-card${size === 'wide' ? ' modal-wide' : ''}${size === 'full' ? ' modal-full' : ''}`;
-  return (
-    <div className="modal-backdrop" onClick={onClose}>
-      <div className={modalClass} onClick={(event) => event.stopPropagation()}>
-        <div className="modal-header">
-          <div className="modal-heading">
-            <h2>{title}</h2>
-            {description ? <p>{description}</p> : null}
-          </div>
-          <button type="button" className="modal-close" onClick={onClose} aria-label="Close modal">
-            <CloseIcon className="button-icon" />
-          </button>
-        </div>
+  const cardRef = useRef(null);
+  const layerRef = useRef(null);
+  // Stable across re-renders (the refs themselves never change identity),
+  // so this doesn't cause dropdown consumers to re-render needlessly.
+  const modalContextValue = useMemo(() => ({ cardRef, layerRef }), []);
 
-        <div className="modal-body">{children}</div>
-        {footer ? <div className="modal-footer">{footer}</div> : null}
+  return (
+    <ModalLayerContext.Provider value={modalContextValue}>
+      <div className="modal-backdrop" onClick={onClose}>
+        <div className={modalClass} ref={cardRef} onClick={(event) => event.stopPropagation()}>
+          <div className="modal-header">
+            <div className="modal-heading">
+              <h2>{title}</h2>
+              {description ? <p>{description}</p> : null}
+            </div>
+            <button type="button" className="modal-close" onClick={onClose} aria-label="Close modal">
+              <CloseIcon className="button-icon" />
+            </button>
+          </div>
+
+          <div className="modal-body">{children}</div>
+          {footer ? <div className="modal-footer">{footer}</div> : null}
+        </div>
       </div>
-    </div>
+      {/* Portaled to document.body (a sibling of modal-backdrop, not nested
+          inside it) so it's unambiguously viewport-fixed with no risk of an
+          ancestor's backdrop-filter/transform redefining its containing
+          block. Dropdowns opened from inside this modal portal into this
+          layer instead of document.body directly, purely so they stack
+          reliably above the modal regardless of DOM/mount order - actual
+          positioning stays viewport-relative either way (see DropdownMenu). */}
+      {createPortal(<div className="modal-dropdown-layer" ref={layerRef} />, document.body)}
+    </ModalLayerContext.Provider>
   );
 };
 
@@ -482,37 +524,55 @@ export const FormField = ({
   );
 };
 
-export const DropdownMenu = ({ trigger, open, onOpenChange, children, className = '' }) => {
+export const DropdownMenu = ({ trigger, open, onOpenChange, children, className = '', matchTriggerWidth = false }) => {
   const triggerRef = useRef(null);
   const menuRef = useRef(null);
-  const [position, setPosition] = useState({ top: 8, left: 8 });
+  const [instanceId] = useState(() => Symbol('dropdown-menu'));
+  // Set only when opened from inside a MasterModal - null everywhere else
+  // (e.g. a row-action menu on a plain list page).
+  const modalRefs = useContext(ModalLayerContext);
+  const [position, setPosition] = useState({ top: 8, left: 8, width: null });
 
   useLayoutEffect(() => {
     if (!open || !triggerRef.current || !menuRef.current) return;
 
     const triggerRect = triggerRef.current.getBoundingClientRect();
     const menuRect = menuRef.current.getBoundingClientRect();
-    const viewportWidth = window.innerWidth;
-    const viewportHeight = window.innerHeight;
-    const scrollX = window.scrollX || window.pageXOffset || 0;
-    const scrollY = window.scrollY || window.pageYOffset || 0;
+    // The box to clamp/flip against: the modal card's own measured bounds
+    // when inside one (so the panel stays visually within the dialog and
+    // flips based on the dialog's own free space), the viewport otherwise.
+    // Always measured directly via getBoundingClientRect - never inferred
+    // through CSS sizing tricks, which is what made the panel misaligned
+    // before (a CSS Grid "overlay" layer that was supposed to exactly match
+    // the modal card's box doesn't reliably do so: percentage width/height
+    // against an auto-sized grid track is spec-ambiguous).
+    const cardNode = modalRefs?.cardRef?.current || null;
+    const boundsRect = cardNode
+      ? cardNode.getBoundingClientRect()
+      : { top: 0, left: 0, width: window.innerWidth, height: window.innerHeight };
+    const boundsBottom = boundsRect.top + boundsRect.height;
+    const boundsRight = boundsRect.left + boundsRect.width;
 
-    const menuWidth = menuRect.width || 180;
+    const menuWidth = matchTriggerWidth ? triggerRect.width : (menuRect.width || 180);
     const menuHeight = menuRect.height || 160;
-    const spaceBelow = viewportHeight - triggerRect.bottom;
-    const spaceAbove = triggerRect.top;
+    const spaceBelow = boundsBottom - triggerRect.bottom;
+    const spaceAbove = triggerRect.top - boundsRect.top;
     const placeBelow = spaceBelow >= menuHeight || spaceBelow > spaceAbove;
 
-    let top = placeBelow
-      ? triggerRect.bottom + 8 + scrollY
-      : triggerRect.top - menuHeight - 8 + scrollY;
+    // The panel always portals into a layer that is itself `position: fixed;
+    // inset: 0` (either the modal's own overlay layer or document.body
+    // directly) - so these stay viewport-relative regardless of portal
+    // target, and no conversion to a container-relative coordinate space is
+    // needed (that conversion, tied to the CSS-matched layer box above, was
+    // the actual source of the misalignment).
+    let top = placeBelow ? triggerRect.bottom + 8 : triggerRect.top - menuHeight - 8;
+    let left = matchTriggerWidth ? triggerRect.left : triggerRect.right - menuWidth;
 
-    let left = triggerRect.right - menuWidth + scrollX;
-    left = Math.min(Math.max(left, 8 + scrollX), viewportWidth - menuWidth - 8 + scrollX);
-    top = Math.min(Math.max(top, 8 + scrollY), viewportHeight - menuHeight - 8 + scrollY);
+    left = Math.min(Math.max(left, boundsRect.left + 8), boundsRight - menuWidth - 8);
+    top = Math.min(Math.max(top, boundsRect.top + 8), boundsBottom - menuHeight - 8);
 
-    setPosition({ top, left });
-  }, [open, children]);
+    setPosition({ top, left, width: matchTriggerWidth ? triggerRect.width : null });
+  }, [open, children, modalRefs, matchTriggerWidth]);
 
   useEffect(() => {
     if (!open) return undefined;
@@ -539,6 +599,34 @@ export const DropdownMenu = ({ trigger, open, onOpenChange, children, className 
     };
   }, [open, onOpenChange]);
 
+  // Registers to be told when some other DropdownMenu instance opens, and
+  // (separately) announces its own opening to everyone else - so opening any
+  // dropdown always closes whichever other one was open, with no shared
+  // state to thread through every call site.
+  //
+  // Only reacts if THIS instance is currently open. Row-action menus (e.g.
+  // Audit Log, Roles) share one `menuOpenId` value across every row via a
+  // controlled `open` prop, so at most one is ever open already - without
+  // this check, every already-closed row would still call onOpenChange(false)
+  // (-> setMenuOpenId(null)) in reaction to another row opening, stomping the
+  // shared state back to null right after it was set and making every menu
+  // but the one that happened to win that race look like it silently refused to open.
+  useEffect(() => {
+    const listener = (exceptId) => {
+      if (exceptId !== instanceId && open) {
+        onOpenChange(false);
+      }
+    };
+    dropdownCloseListeners.add(listener);
+    return () => dropdownCloseListeners.delete(listener);
+  }, [onOpenChange, instanceId, open]);
+
+  useEffect(() => {
+    if (open) {
+      closeOtherDropdowns(instanceId);
+    }
+  }, [open, instanceId]);
+
   const triggerWithProps = useMemo(() => {
     if (!trigger) return null;
     return cloneElement(trigger, {
@@ -561,6 +649,8 @@ export const DropdownMenu = ({ trigger, open, onOpenChange, children, className 
     });
   }, [trigger, open, onOpenChange]);
 
+  const portalTarget = modalRefs?.layerRef?.current || document.body;
+
   return (
     <>
       {triggerWithProps}
@@ -569,15 +659,110 @@ export const DropdownMenu = ({ trigger, open, onOpenChange, children, className 
           <div
             ref={menuRef}
             className={`dropdown-menu ${className}`.trim()}
-            style={{ top: `${position.top}px`, left: `${position.left}px` }}
+            style={{
+              top: `${position.top}px`,
+              left: `${position.left}px`,
+              width: position.width ? `${position.width}px` : undefined,
+            }}
             onMouseDown={(event) => event.stopPropagation()}
           >
             {children}
           </div>
         </div>,
-        document.body,
+        portalTarget,
       )}
     </>
+  );
+};
+
+// Searchable dropdown for long option lists (e.g. hundreds of products) -
+// a plain <select> makes finding one entry by scrolling painful. Built on top
+// of DropdownMenu so it gets the same viewport-aware floating panel and
+// outside-click/escape handling as every other menu in the app.
+export const SearchableSelect = ({
+  value,
+  onChange,
+  options,
+  placeholder = 'Select...',
+  searchPlaceholder = 'Search...',
+  emptyLabel = 'No matches',
+  disabled = false,
+}) => {
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState('');
+  const inputRef = useRef(null);
+
+  const selectedLabel = useMemo(() => {
+    const match = options.find((option) => String(option.value) === String(value ?? ''));
+    return match ? match.label : '';
+  }, [options, value]);
+
+  const filteredOptions = useMemo(() => {
+    const term = query.trim().toLowerCase();
+    if (!term) return options;
+    return options.filter((option) => option.label.toLowerCase().includes(term));
+  }, [options, query]);
+
+  useEffect(() => {
+    if (!open) return undefined;
+    setQuery('');
+    const raf = requestAnimationFrame(() => inputRef.current?.focus());
+    return () => cancelAnimationFrame(raf);
+  }, [open]);
+
+  const selectOption = (option) => {
+    onChange(option.value);
+    setOpen(false);
+  };
+
+  return (
+    <DropdownMenu
+      open={open}
+      onOpenChange={(next) => !disabled && setOpen(next)}
+      className="searchable-select-panel"
+      matchTriggerWidth
+      trigger={
+        <button type="button" className="searchable-select-trigger" disabled={disabled}>
+          <span className={selectedLabel ? 'searchable-select-value' : 'searchable-select-placeholder'}>
+            {selectedLabel || placeholder}
+          </span>
+          <ChevronIcon className="searchable-select-chevron" />
+        </button>
+      }
+    >
+      <div className="searchable-select-search">
+        <SearchIcon className="searchable-select-search-icon" />
+        <input
+          ref={inputRef}
+          type="text"
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === 'Enter' && filteredOptions.length > 0) {
+              event.preventDefault();
+              selectOption(filteredOptions[0]);
+            }
+          }}
+          placeholder={searchPlaceholder}
+        />
+      </div>
+      <div className="searchable-select-options">
+        {filteredOptions.length === 0 ? (
+          <div className="searchable-select-empty">{emptyLabel}</div>
+        ) : (
+          filteredOptions.map((option) => (
+            <button
+              type="button"
+              key={option.value}
+              className={`dropdown-menu-item ${String(option.value) === String(value ?? '') ? 'active' : ''}`}
+              onClick={() => selectOption(option)}
+            >
+              {option.label}
+            </button>
+          ))
+        )}
+      </div>
+    </DropdownMenu>
   );
 };
 
@@ -600,7 +785,10 @@ export const DataTable = ({
   onToggleRow,
   onToggleAll,
 }) => {
-  const extraColumnCount = 1 + (selectable ? 1 : 0);
+  // Hide the Actions column entirely for a genuinely read-only list, rather
+  // than showing a "..." trigger that opens an empty dropdown with nothing in it.
+  const hasActions = Boolean(renderRowActions) || rowActions.length > 0;
+  const extraColumnCount = (hasActions ? 1 : 0) + (selectable ? 1 : 0);
   const allSelected = selectable && rows.length > 0 && rows.every((row) => selectedIds?.has(row.id));
 
   return (
@@ -624,7 +812,7 @@ export const DataTable = ({
                 {column.label}
               </th>
             ))}
-            <th className="action-head">Actions</th>
+            {hasActions ? <th className="action-head">Actions</th> : null}
           </tr>
         </thead>
         <tbody ref={menuRef}>
@@ -660,78 +848,106 @@ export const DataTable = ({
                     </td>
                   );
                 })}
-                <td className="action-cell">
-                  <div className="row-actions">
-                    <DropdownMenu
-                      open={menuOpenId === row.id}
-                      onOpenChange={(isOpen) => onToggleMenu(isOpen ? row.id : null)}
-                      trigger={
-                        <button type="button" className="row-menu-trigger" aria-label="Open row actions">
-                          <DotsIcon className="button-icon" />
-                        </button>
-                      }
-                    >
-                      <div className="dropdown-menu-list">
-                        {renderRowActions ? renderRowActions(row) : (
-                          <>
-                            {rowActions.includes('edit') ? (
-                              <button
-                                type="button"
-                                className="dropdown-menu-item"
-                                onClick={() => {
-                                  onEdit(row);
-                                  onToggleMenu(null);
-                                }}
-                              >
-                                <PencilIcon className="menu-icon" />
-                                <span>Edit</span>
-                              </button>
-                            ) : null}
-                            {rowActions.includes('assign-permissions') && onExtraAction ? (
-                              <button
-                                type="button"
-                                className="dropdown-menu-item"
-                                onClick={() => {
-                                  onExtraAction('assign-permissions', row);
-                                  onToggleMenu(null);
-                                }}
-                              >
-                                <ShieldIcon className="menu-icon" />
-                                <span>Permissions</span>
-                              </button>
-                            ) : null}
-                            {rowActions.includes('set-price') && onExtraAction ? (
-                              <button
-                                type="button"
-                                className="dropdown-menu-item"
-                                onClick={() => {
-                                  onExtraAction('set-price', row);
-                                  onToggleMenu(null);
-                                }}
-                              >
-                                <WalletIcon className="menu-icon" />
-                                <span>Set Price</span>
-                              </button>
-                            ) : null}
-                            {rowActions.includes('delete') ? (
-                              <button
-                                type="button"
-                                className="dropdown-menu-item danger"
-                                onClick={() => {
-                                  onDelete(row);
-                                  onToggleMenu(null);
-                                }}
-                              >
-                                <TrashIcon className="menu-icon" />
-                                <span>Delete</span>
-                              </button>
-                            ) : null}
-                          </>
-                        )}
-                      </div>
-                    </DropdownMenu>
-                  </div>
-                </td>
+                {hasActions ? (
+                  <td className="action-cell">
+                    <div className="row-actions">
+                      <DropdownMenu
+                        open={menuOpenId === row.id}
+                        onOpenChange={(isOpen) => onToggleMenu(isOpen ? row.id : null)}
+                        trigger={
+                          <button type="button" className="row-menu-trigger" aria-label="Open row actions">
+                            <DotsIcon className="button-icon" />
+                          </button>
+                        }
+                      >
+                        <div className="dropdown-menu-list">
+                          {renderRowActions ? renderRowActions(row) : (
+                            <>
+                              {rowActions.includes('edit') ? (
+                                <button
+                                  type="button"
+                                  className="dropdown-menu-item"
+                                  onClick={() => {
+                                    onEdit(row);
+                                    onToggleMenu(null);
+                                  }}
+                                >
+                                  <PencilIcon className="menu-icon" />
+                                  <span>Edit</span>
+                                </button>
+                              ) : null}
+                              {rowActions.includes('assign-permissions') && onExtraAction ? (
+                                <button
+                                  type="button"
+                                  className="dropdown-menu-item"
+                                  onClick={() => {
+                                    onExtraAction('assign-permissions', row);
+                                    onToggleMenu(null);
+                                  }}
+                                >
+                                  <ShieldIcon className="menu-icon" />
+                                  <span>Permissions</span>
+                                </button>
+                              ) : null}
+                              {rowActions.includes('set-price') && onExtraAction ? (
+                                <button
+                                  type="button"
+                                  className="dropdown-menu-item"
+                                  onClick={() => {
+                                    onExtraAction('set-price', row);
+                                    onToggleMenu(null);
+                                  }}
+                                >
+                                  <WalletIcon className="menu-icon" />
+                                  <span>Set Price</span>
+                                </button>
+                              ) : null}
+                              {rowActions.includes('set-default') && onExtraAction && !row.is_default ? (
+                                <button
+                                  type="button"
+                                  className="dropdown-menu-item"
+                                  onClick={() => {
+                                    onExtraAction('set-default', row);
+                                    onToggleMenu(null);
+                                  }}
+                                >
+                                  <CheckIcon className="menu-icon" />
+                                  <span>Make Default</span>
+                                </button>
+                              ) : null}
+                              {rowActions.includes('quantity-pricing') && onExtraAction ? (
+                                <button
+                                  type="button"
+                                  className="dropdown-menu-item"
+                                  onClick={() => {
+                                    onExtraAction('quantity-pricing', row);
+                                    onToggleMenu(null);
+                                  }}
+                                >
+                                  <AppIcon name="tag" className="menu-icon" />
+                                  <span>Quantity Pricing</span>
+                                </button>
+                              ) : null}
+                              {rowActions.includes('delete') ? (
+                                <button
+                                  type="button"
+                                  className="dropdown-menu-item danger"
+                                  onClick={() => {
+                                    onDelete(row);
+                                    onToggleMenu(null);
+                                  }}
+                                >
+                                  <TrashIcon className="menu-icon" />
+                                  <span>Delete</span>
+                                </button>
+                              ) : null}
+                            </>
+                          )}
+                        </div>
+                      </DropdownMenu>
+                    </div>
+                  </td>
+                ) : null}
               </tr>
             ))
           )}

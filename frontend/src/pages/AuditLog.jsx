@@ -9,7 +9,8 @@ import {
   RefreshIcon,
   StatusBadge,
 } from '../components/masterData/MasterDataPrimitives';
-import { fetchAuditLogs, fetchUsersForFilter } from '../services/auditService';
+import { fetchAuditLogs, fetchUsersForFilter, fetchActivitySummary } from '../services/auditService';
+import { formatDateTime } from '../utils/datetime';
 
 const PAGE_SIZES = [10, 20, 50, 100];
 
@@ -25,13 +26,7 @@ const ACTION_TONE = {
   PRINT: 'default',
 };
 
-const formatDateTime = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
-};
-
-const AuditLog = ({ token, onLogout, embedded = false }) => {
+const AuditLog = ({ token, onLogout, embedded = false, viewerTimezone }) => {
   const [users, setUsers] = useState([]);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -42,6 +37,8 @@ const AuditLog = ({ token, onLogout, embedded = false }) => {
   const [filters, setFilters] = useState({ user_id: '', target_table: '', action: '', from: '', to: '' });
   const [viewRecord, setViewRecord] = useState(null);
   const [menuOpenId, setMenuOpenId] = useState(null);
+  const [summary, setSummary] = useState(null);
+  const [showSummary, setShowSummary] = useState(false);
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -80,7 +77,22 @@ const AuditLog = ({ token, onLogout, embedded = false }) => {
 
   useEffect(() => { load(); }, [page, pageSize]);
 
-  const applyFilters = () => { setPage(1); load(); };
+  const loadSummary = async () => {
+    try {
+      setSummary(await fetchActivitySummary(token, { from: filters.from, to: filters.to }));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      // Summary is a supplementary view - a failure here shouldn't block the log table itself.
+    }
+  };
+
+  const toggleSummary = () => {
+    const next = !showSummary;
+    setShowSummary(next);
+    if (next && !summary) loadSummary();
+  };
+
+  const applyFilters = () => { setPage(1); load(); if (showSummary) loadSummary(); };
   const resetFilters = () => {
     setFilters({ user_id: '', target_table: '', action: '', from: '', to: '' });
     setPage(1);
@@ -95,7 +107,7 @@ const AuditLog = ({ token, onLogout, embedded = false }) => {
   ];
 
   const renderCell = (row, column) => {
-    if (column.key === 'timestamp') return formatDateTime(row.timestamp);
+    if (column.key === 'timestamp') return formatDateTime(row.timestamp, viewerTimezone);
     if (column.key === 'action') return <StatusBadge value={row.action} type={ACTION_TONE[row.action] || 'default'} />;
     if (column.key === 'username') return row.username || `User #${row.user_id ?? '-'}`;
     return row[column.key] ?? '-';
@@ -113,6 +125,57 @@ const AuditLog = ({ token, onLogout, embedded = false }) => {
 
       <div className="procurement-shell">
         {listError ? <div className="status-banner status-banner-error">{listError}</div> : null}
+
+        <div className="procurement-card">
+          <div className="table-headline">
+            <div>
+              <h2>Activity Summary</h2>
+              <p>Who's been active, and doing what, within the From/To filter below.</p>
+            </div>
+            <button type="button" className="master-button master-button-secondary" onClick={toggleSummary}>
+              {showSummary ? 'Hide Summary' : 'Show Summary'}
+            </button>
+          </div>
+          {showSummary ? (
+            !summary ? <div>Loading summary...</div> : (
+              <div className="dashboard-columns">
+                <div>
+                  <strong style={{ display: 'block', fontSize: '12px', color: 'var(--md-muted)', marginBottom: '8px' }}>By User</strong>
+                  {summary.by_user.length === 0 ? <div className="payment-history-empty">No activity in this range.</div> : (
+                    <table className="procurement-items-table">
+                      <thead><tr><th>User</th><th>Actions</th><th>Last Activity</th></tr></thead>
+                      <tbody>
+                        {summary.by_user.map((row) => (
+                          <tr key={row.user_id ?? row.user_label}>
+                            <td data-label="User">{row.user_label}</td>
+                            <td data-label="Actions">{row.action_count}</td>
+                            <td data-label="Last Activity">{formatDateTime(row.last_activity, viewerTimezone)}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+                <div>
+                  <strong style={{ display: 'block', fontSize: '12px', color: 'var(--md-muted)', marginBottom: '8px' }}>By Action</strong>
+                  {summary.by_action.length === 0 ? <div className="payment-history-empty">No activity in this range.</div> : (
+                    <table className="procurement-items-table">
+                      <thead><tr><th>Action</th><th>Count</th></tr></thead>
+                      <tbody>
+                        {summary.by_action.map((row) => (
+                          <tr key={row.action}>
+                            <td data-label="Action"><StatusBadge value={row.action} type={ACTION_TONE[row.action] || 'default'} /></td>
+                            <td data-label="Count">{row.action_count}</td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  )}
+                </div>
+              </div>
+            )
+          ) : null}
+        </div>
 
         <div className="procurement-card">
           <div className="procurement-grid">
@@ -175,7 +238,7 @@ const AuditLog = ({ token, onLogout, embedded = false }) => {
         <MasterModal
           size="wide"
           title={`${viewRecord.action} on ${viewRecord.target_table || 'unknown'}`}
-          description={`By ${viewRecord.username || `User #${viewRecord.user_id}`} at ${formatDateTime(viewRecord.timestamp)}`}
+          description={`By ${viewRecord.username || `User #${viewRecord.user_id}`} at ${formatDateTime(viewRecord.timestamp, viewerTimezone)}`}
           onClose={() => setViewRecord(null)}
           footer={<button type="button" className="master-button master-button-secondary" onClick={() => setViewRecord(null)}>Close</button>}
         >

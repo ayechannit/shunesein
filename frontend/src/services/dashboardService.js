@@ -22,18 +22,4 @@ const buildRequest = async (url, token, options = {}) => {
   return payload;
 };
 
-// Returns { key: value } rather than the raw row array - callers just want a lookup map.
-export const fetchSettings = async (token) => {
-  const rows = await buildRequest(`${API_ROOT}/misc/settings`, token);
-  return rows.reduce((acc, row) => {
-    acc[row.key] = row.value;
-    return acc;
-  }, {});
-};
-
-export const updateSettings = async (token, settings) =>
-  buildRequest(`${API_ROOT}/misc/settings`, token, {
-    method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ settings }),
-  });
+export const fetchDashboard = async (token) => buildRequest(`${API_ROOT}/misc/dashboard`, token);

@@ -96,10 +96,42 @@ export const deleteSalesInvoice = async (token, id) =>
     method: 'DELETE',
   });
 
+// Sales Returns / Credit Notes
+export const fetchSalesReturns = async (token, params = {}) => {
+  const query = new URLSearchParams({
+    page: '1',
+    limit: '20',
+    ...params,
+  });
+  return buildRequest(`${API_ROOT}/sales/returns?${query.toString()}`, token);
+};
+
+export const fetchSalesReturnById = async (token, id) =>
+  buildRequest(`${API_ROOT}/sales/returns/${id}`, token);
+
+export const createSalesReturn = async (token, payload) =>
+  buildRequest(`${API_ROOT}/sales/returns`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+export const deleteSalesReturn = async (token, id) =>
+  buildRequest(`${API_ROOT}/sales/returns/${id}`, token, {
+    method: 'DELETE',
+  });
+
 // Lookups
 export const fetchCustomers = async (token) => {
   const response = await buildRequest(`${API_ROOT}/master/customers?page=1&limit=1000&search=&sortBy=name&order=ASC`, token);
   return response.data || [];
+};
+
+// Quantity-tier price suggestion for a line - see PricingController.
+export const fetchSuggestedPrice = async (token, { product_id, quantity }) => {
+  const query = new URLSearchParams({ product_id: String(product_id), quantity: String(quantity || 1) });
+  const response = await buildRequest(`${API_ROOT}/pricing/suggest?${query.toString()}`, token);
+  return response.unit_price;
 };
 
 // Products, warehouses, payment methods, accounts, and payment recording are

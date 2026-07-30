@@ -14,6 +14,24 @@ const sanitizeSort = (table, sortBy, fallback) => {
   return allowed.includes(sortBy) ? sortBy : fallback;
 };
 
+// Production consumes Raw Material products and outputs Finished Goods
+// products - this rejects a batch that tries to mix them up (e.g. consuming a
+// finished good as a raw material) rather than trusting the frontend filter alone.
+const validateProductTypes = async (client, productIds, expectedTypeName) => {
+  const uniqueIds = [...new Set(productIds)];
+  const result = await client.query(
+    `SELECT p.id FROM products p
+     JOIN product_types pt ON pt.id = p.product_type_id
+     WHERE p.id = ANY($1) AND pt.name = $2`,
+    [uniqueIds, expectedTypeName]
+  );
+  const validIds = new Set(result.rows.map((row) => row.id));
+  const invalidIds = uniqueIds.filter((id) => !validIds.has(id));
+  if (invalidIds.length > 0) {
+    throw new HttpError(400, `Only "${expectedTypeName}" products are allowed here. Invalid product ID(s): ${invalidIds.join(', ')}.`);
+  }
+};
+
 class InventoryController {
   // --- Production Batches ---
   getAllBatches = async (req, res) => {
@@ -74,6 +92,8 @@ class InventoryController {
 
     try {
       const batch = await db.withTransaction(async (client) => {
+        await validateProductTypes(client, raw_materials.map((item) => item.product_id), 'Raw Material');
+
         const batchResult = await client.query(
           'INSERT INTO production_batches (batch_number, remark, created_by, status) VALUES ($1, $2, $3, $4) RETURNING *',
           [batch_number, remark, req.user.id, 'pending']
@@ -92,7 +112,12 @@ class InventoryController {
       });
 
       res.status(201).json(batch);
-    } catch (error) { res.status(500).json({ error: error.message }); }
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
   };
 
   // Status flow: pending -> in_progress -> completed, or pending/in_progress -> cancelled.
@@ -147,10 +172,11 @@ class InventoryController {
           if (!finished_goods || finished_goods.length === 0) {
             throw new HttpError(400, 'At least one finished good is required to complete a batch.');
           }
+          await validateProductTypes(client, finished_goods.map((item) => item.product_id), 'Finished Goods');
           for (const item of finished_goods) {
             await client.query(
-              'INSERT INTO production_finished_goods (batch_id, product_id, quantity, warehouse_id, unit_cost) VALUES ($1, $2, $3, $4, $5)',
-              [id, item.product_id, item.quantity, item.warehouse_id, item.unit_cost || null]
+              'INSERT INTO production_finished_goods (batch_id, product_id, quantity, warehouse_id, unit_cost, lot_number, expiry_date) VALUES ($1, $2, $3, $4, $5, $6, $7)',
+              [id, item.product_id, item.quantity, item.warehouse_id, item.unit_cost || null, item.lot_number || null, item.expiry_date || null]
             );
             await client.query(
               'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',

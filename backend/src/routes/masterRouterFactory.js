@@ -5,13 +5,23 @@ const upload = multer({ dest: 'uploads/' });
 
 // Reads (list/export/get one) stay open to any authenticated user.
 // Writes (create/update/delete/import) require `writePermission` when one is given.
-const createMasterRouter = (controller, writePermission) => {
+//
+// Pass { readOnly: true } for a fixed catalog with no create/edit/delete UI
+// at all (e.g. product types, permissions) - the write routes aren't
+// registered, so there's no way to hit them even directly via the API,
+// regardless of permissions.
+const createMasterRouter = (controller, writePermission, options = {}) => {
   const router = express.Router();
-  const guardWrite = writePermission ? [checkPermission(writePermission)] : [];
 
   router.get('/', controller.getAll);
   router.get('/export', controller.exportCSV);
   router.get('/:id', controller.getOne);
+
+  if (options.readOnly) {
+    return router;
+  }
+
+  const guardWrite = writePermission ? [checkPermission(writePermission)] : [];
   router.post('/', ...guardWrite, controller.create);
   router.post('/import', ...guardWrite, upload.single('file'), controller.importCSV);
   router.put('/:id', ...guardWrite, controller.update);

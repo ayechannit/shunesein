@@ -7,6 +7,7 @@ const router = express.Router();
 
 // Audit Routes
 router.get('/', verifyToken, checkPermission(VIEW_AUDIT_LOG), auditCtrl.getAll);
+router.get('/summary', verifyToken, checkPermission(VIEW_AUDIT_LOG), auditCtrl.getActivitySummary);
 router.post('/log-print', verifyToken, auditCtrl.logPrint);
 
 module.exports = router;

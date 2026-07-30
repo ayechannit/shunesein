@@ -26,14 +26,9 @@ import {
   fetchAccountLedger,
   fetchAccounts,
 } from '../services/financeService';
+import { formatDate, todayLocal as today, firstOfMonthLocal as firstOfMonth } from '../utils/datetime';
 
 const PAGE_SIZES = [5, 10, 20, 50];
-
-const formatDate = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString();
-};
 
 const formatNumber = (value) => {
   if (value === null || value === undefined || value === '') return '-';
@@ -101,7 +96,7 @@ const Finance = ({ token, onLogout, embedded = false, defaultTab = 'entries' }) 
 
 // ─────────────────────────── Income & Expense ───────────────────────────
 
-const emptyEntryForm = () => ({ category_id: '', date: '', amount: '', account_id: '', description: '' });
+const emptyEntryForm = () => ({ category_id: '', date: today(), amount: '', account_id: '', description: '' });
 
 const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId, setMenuOpenId, setPageSuccess }) => {
   const [rows, setRows] = useState([]);
@@ -329,7 +324,7 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
 
 // ─────────────────────────── Fund Transfers ───────────────────────────
 
-const emptyTransferForm = () => ({ transfer_number: '', from_account_id: '', to_account_id: '', amount: '', date: '', remark: '' });
+const emptyTransferForm = () => ({ transfer_number: '', from_account_id: '', to_account_id: '', amount: '', date: today(), remark: '' });
 
 const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuOpenId, setPageSuccess }) => {
   const [rows, setRows] = useState([]);
@@ -562,8 +557,8 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
 
 const LedgerTab = ({ token, onLogout, accounts }) => {
   const [accountId, setAccountId] = useState('');
-  const [fromDate, setFromDate] = useState('');
-  const [toDate, setToDate] = useState('');
+  const [fromDate, setFromDate] = useState(firstOfMonth());
+  const [toDate, setToDate] = useState(today());
   const [ledger, setLedger] = useState(null);
   const [loading, setLoading] = useState(false);
   const [localError, setLocalError] = useState('');

@@ -1,8 +1,9 @@
 const MasterDataController = require('../controllers/MasterDataController');
+const printSetupCtrl = require('../controllers/PrintSetupController');
 const createMasterRouter = require('./masterRouterFactory');
 const express = require('express');
-const { verifyToken } = require('../middleware/auth');
-const { MANAGE_MASTER_DATA } = require('../utils/permissions');
+const { verifyToken, checkPermission } = require('../middleware/auth');
+const { MANAGE_MASTER_DATA, MANAGE_SETTINGS } = require('../utils/permissions');
 const router = express.Router();
 
 // Define Controllers for each Master Data table
@@ -23,6 +24,16 @@ router.use('/customers', verifyToken, createMasterRouter(customerCtrl, MANAGE_MA
 router.use('/warehouses', verifyToken, createMasterRouter(warehouseCtrl, MANAGE_MASTER_DATA));
 router.use('/accounts', verifyToken, createMasterRouter(accountCtrl, MANAGE_MASTER_DATA));
 router.use('/payment-methods', verifyToken, createMasterRouter(paymentMethodCtrl, MANAGE_MASTER_DATA));
-router.use('/product-types', verifyToken, createMasterRouter(productTypeCtrl, MANAGE_MASTER_DATA));
+
+// Product types are fixed to "Raw Material" / "Finished Goods" - read-only
+// lookup for the Products form and Production pickers, no create/edit/delete
+// exposed at all (not even behind a permission check).
+router.use('/product-types', verifyToken, createMasterRouter(productTypeCtrl, null, { readOnly: true }));
+
+// Print Page Setups - multiple named margin/page-size profiles, one marked
+// default. The generic CRUD covers list/create/edit/delete; "set default" is
+// its own action since it must clear every other row's flag atomically.
+router.post('/print-page-setups/:id/set-default', verifyToken, checkPermission(MANAGE_SETTINGS), printSetupCtrl.setDefault);
+router.use('/print-page-setups', verifyToken, createMasterRouter(printSetupCtrl, MANAGE_SETTINGS));
 
 module.exports = router;

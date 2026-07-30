@@ -44,7 +44,8 @@ class AuthController {
           id: user.id,
           username: user.username,
           full_name: user.full_name,
-          role_name: user.role_name
+          role_name: user.role_name,
+          timezone: user.timezone || 'UTC'
         }
       });
     } catch (error) {
@@ -59,6 +60,46 @@ class AuthController {
     try {
       await logAction(req.user.id, 'LOGOUT', 'users', req.user.id, null, null);
       res.json({ message: 'Logged out' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // The JWT payload only ever carries id/username/role - it's signed once at
+  // login and doesn't reflect later profile edits (like a timezone change)
+  // until the next login. This is how the app reads "my own current
+  // profile" without waiting for that.
+  getProfile = async (req, res) => {
+    try {
+      const result = await db.query(
+        'SELECT id, username, full_name, role_id, status, timezone FROM users WHERE id = $1',
+        [req.user.id]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ message: 'User not found' });
+      res.json({ user: result.rows[0] });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Self-service profile update - deliberately not gated by manage_users:
+  // every user, regardless of role, can set their own display name and
+  // timezone. Anything requiring the admin-only permission (username,
+  // role, status) stays on the existing UserController routes.
+  updateProfile = async (req, res) => {
+    try {
+      const userId = req.user.id;
+      const { full_name, timezone } = req.body;
+
+      const result = await db.query(
+        `UPDATE users SET full_name = COALESCE($1, full_name), timezone = COALESCE($2, timezone), updated_at = CURRENT_TIMESTAMP
+         WHERE id = $3 RETURNING id, username, full_name, role_id, status, timezone`,
+        [full_name ?? null, timezone ?? null, userId]
+      );
+      if (result.rows.length === 0) return res.status(404).json({ message: 'User not found' });
+
+      await logAction(userId, 'UPDATE', 'users', userId, null, result.rows[0]);
+      res.json({ user: result.rows[0] });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

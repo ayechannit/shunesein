@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const logAction = require('../utils/auditLogger');
+const { postJournalEntry, reverseJournalEntries, ACCOUNT_CODES } = require('../utils/journalPoster');
 const HttpError = require('../utils/HttpError');
 
 // transaction_type -> table holding the net_amount/payment_status being paid down
@@ -153,6 +154,27 @@ class PaymentController {
           await client.query('UPDATE customers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [numericAmount, transaction.customer_id]);
         }
 
+        // General Ledger: a customer receipt moves cash in and clears AR; a
+        // supplier payment moves cash out and clears AP. Posted against the
+        // single Cash & Bank system account regardless of which specific
+        // cash/bank account this payment used - see migration 011 for why.
+        await postJournalEntry(client, {
+          date: payment.payment_date,
+          referenceType: 'payment',
+          referenceId: payment.id,
+          description: transaction_type === 'purchase' ? `Payment to supplier (voucher #${transaction_id})` : `Payment from customer (invoice #${transaction_id})`,
+          createdBy: created_by,
+          lines: transaction_type === 'purchase'
+            ? [
+                { code: ACCOUNT_CODES.ACCOUNTS_PAYABLE, debit: numericAmount },
+                { code: ACCOUNT_CODES.CASH_AND_BANK, credit: numericAmount },
+              ]
+            : [
+                { code: ACCOUNT_CODES.CASH_AND_BANK, debit: numericAmount },
+                { code: ACCOUNT_CODES.ACCOUNTS_RECEIVABLE, credit: numericAmount },
+              ],
+        });
+
         await logAction(created_by, 'CREATE', 'payments', payment.id, null, payment);
 
         return { payment, remainingBalance: Math.round((remaining - numericAmount) * 100) / 100, status: newStatus };
@@ -218,6 +240,8 @@ class PaymentController {
           const adjustment = paymentRecord.transaction_type === 'purchase' ? Number(paymentRecord.amount) : -Number(paymentRecord.amount);
           await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [adjustment, paymentRecord.account_id]);
         }
+
+        await reverseJournalEntries(client, { referenceType: 'payment', referenceId: id, description: 'Deleted payment', createdBy: req.user.id });
 
         await logAction(req.user.id, 'DELETE', 'payments', id, paymentRecord, null);
 

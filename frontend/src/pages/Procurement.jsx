@@ -23,6 +23,7 @@ import {
   PrinterIcon,
   StatTile,
   ProgressMeter,
+  SearchableSelect,
 } from '../components/masterData/MasterDataPrimitives';
 import {
   fetchPurchaseOrders,
@@ -46,24 +47,17 @@ import {
   fetchPayments,
   deletePayment,
   logPrintAction,
+  fetchPurchaseReturns,
+  fetchPurchaseReturnById,
+  createPurchaseReturn,
+  deletePurchaseReturn,
 } from '../services/procurementService';
-import { fetchSettings } from '../services/settingsService';
+import { fetchPrintPageSetups, toPageSettings } from '../services/printSetupService';
 import { openPrintDocument } from '../utils/printDocument';
+import { formatDate, formatDateTime, todayLocal as today } from '../utils/datetime';
 
 const PAGE_SIZES = [5, 10, 20, 50];
 const PROCUREMENT_TABS = ['orders', 'vouchers'];
-
-const formatDate = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString();
-};
-
-const formatDateTime = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
-};
 
 const formatNumber = (value) => {
   if (value === null || value === undefined || value === '') return '-';
@@ -75,7 +69,8 @@ const formatNumber = (value) => {
 const emptyOrderForm = () => ({
   po_number: '',
   supplier_id: '',
-  order_date: '',
+  order_date: today(),
+  expected_date: today(),
   remark: '',
   items: [{ product_id: '', quantity: '1', unit_price: '0' }],
 });
@@ -85,12 +80,340 @@ const emptyVoucherForm = () => ({
   po_id: '',
   supplier_id: '',
   warehouse_id: '',
-  voucher_date: '',
+  voucher_date: today(),
+  received_date: today(),
+  quality_rating: 'good',
   remark: '',
   discount_amount: '0',
   tax_amount: '0',
   items: [{ product_id: '', quantity: '1', unit_price: '0' }],
 });
+
+const emptyReturnForm = () => ({
+  return_number: '',
+  supplier_id: '',
+  warehouse_id: '',
+  return_date: today(),
+  reason: '',
+  items: [{ product_id: '', quantity: '1', unit_price: '0' }],
+});
+
+// ─────────────────────────── Purchase Returns / Debit Notes ───────────────────────────
+// A deliberately standalone tab, mirroring SalesReturnsTab in Sales.jsx - a
+// return has no status workflow, so it doesn't share the isOrder-ternary
+// state the rest of this file is built around.
+const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, products }) => {
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [formOpen, setFormOpen] = useState(false);
+  const [formValues, setFormValues] = useState(emptyReturnForm());
+  const [formErrors, setFormErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [viewRecord, setViewRecord] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const menuRef = useRef(null);
+
+  const productOptions = useMemo(() => products.map((p) => ({ value: String(p.id), label: p.name })), [products]);
+
+  const load = async () => {
+    setLoading(true);
+    setListError('');
+    try {
+      const response = await fetchPurchaseReturns(token, { page, limit: pageSize, search });
+      setRows(response.data || []);
+      setTotal(Number(response.total || 0));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load purchase returns');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [token, page, pageSize]);
+
+  useEffect(() => {
+    const handleOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpenId(null);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const updateItem = (index, key, value) => {
+    const nextItems = [...formValues.items];
+    nextItems[index] = { ...nextItems[index], [key]: value };
+    setFormValues((previous) => ({ ...previous, items: nextItems }));
+  };
+  const addItem = () => setFormValues((previous) => ({ ...previous, items: [...previous.items, { product_id: '', quantity: '1', unit_price: '0' }] }));
+  const removeItem = (index) => setFormValues((previous) => ({ ...previous, items: previous.items.filter((_, i) => i !== index) }));
+
+  const summaryTotal = (formValues.items || []).reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0);
+
+  const openCreate = () => {
+    setFormValues(emptyReturnForm());
+    setFormErrors({});
+    setFormOpen(true);
+  };
+
+  const submitForm = async () => {
+    const nextErrors = {};
+    if (!formValues.supplier_id) nextErrors.supplier_id = 'Supplier is required.';
+    if (!formValues.warehouse_id) nextErrors.warehouse_id = 'Warehouse is required.';
+    if (!formValues.items || formValues.items.length === 0) nextErrors.items = 'At least one item is required.';
+    (formValues.items || []).forEach((item, index) => {
+      if (!item.product_id) nextErrors[`item-product-${index}`] = 'Product is required.';
+      if (!item.quantity || Number(item.quantity) <= 0) nextErrors[`item-quantity-${index}`] = 'Quantity must be greater than 0.';
+      if (!item.unit_price || Number(item.unit_price) <= 0) nextErrors[`item-price-${index}`] = 'Price must be greater than 0.';
+    });
+    if (Object.keys(nextErrors).length > 0) {
+      setFormErrors(nextErrors);
+      return;
+    }
+
+    setSaving(true);
+    setSuccess('');
+    setListError('');
+    try {
+      const payload = {
+        ...formValues,
+        return_number: formValues.return_number || `PR-${Date.now()}`,
+        return_date: formValues.return_date || new Date().toISOString().slice(0, 10),
+        supplier_id: Number(formValues.supplier_id),
+        warehouse_id: Number(formValues.warehouse_id),
+        items: formValues.items.map((item) => ({
+          ...item,
+          product_id: Number(item.product_id),
+          quantity: Number(item.quantity),
+          unit_price: Number(item.unit_price),
+        })),
+      };
+      await createPurchaseReturn(token, payload);
+      setSuccess('Purchase return recorded.');
+      setFormOpen(false);
+      setFormValues(emptyReturnForm());
+      setPage(1);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setFormErrors({ submit: error.message || 'Unable to record return' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleView = async (row) => {
+    setMenuOpenId(null);
+    try {
+      setViewRecord(await fetchPurchaseReturnById(token, row.id));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load return detail');
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    setSaving(true);
+    setDeleteError('');
+    try {
+      await deletePurchaseReturn(token, deleteTarget.id);
+      setSuccess('Purchase return deleted.');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setDeleteError(error.message || 'Unable to delete return');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const columns = [
+    { key: 'return_number', label: 'Return Number' },
+    { key: 'supplier_name', label: 'Supplier' },
+    { key: 'warehouse_name', label: 'Warehouse' },
+    { key: 'return_date', label: 'Return Date' },
+    { key: 'total_amount', label: 'Total Amount', align: 'right' },
+  ];
+
+  const renderCell = (row, column) => {
+    if (column.key === 'return_date') return formatDate(row.return_date);
+    if (column.key === 'total_amount') return formatNumber(row.total_amount);
+    return row[column.key] ?? '-';
+  };
+
+  const content = (
+    <div className="procurement-shell">
+      {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Procurement', 'Purchase Returns']} title="Purchase Returns" description="Record goods sent back to a supplier - stock goes out, and what we owe them drops." actions={null} /> : null}
+      {success ? <div className="status-banner status-banner-success status-banner-autodismiss" style={{ marginBottom: '1rem' }}>{success}</div> : null}
+      {listError ? <div className="status-banner status-banner-error" style={{ marginBottom: '1rem' }}>{listError}</div> : null}
+
+      <div className="procurement-toolbar">
+        <SearchToolbar
+          searchValue={search}
+          onSearchValueChange={setSearch}
+          onSubmit={() => { setPage(1); load(); }}
+          onReset={() => { setSearch(''); setPage(1); }}
+          sortValue="id-desc"
+          onSortChange={() => {}}
+          sortOptions={[{ value: 'id-desc', label: 'Newest First' }]}
+          extraActions={(
+            <>
+              <AppButton variant="secondary" onClick={load} iconLeft={<RefreshIcon className="button-icon" />}>Refresh</AppButton>
+              <AppButton variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="button-icon" />}>New Return</AppButton>
+            </>
+          )}
+        />
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        renderRowActions={(row) => (
+          <div className="dropdown-menu-list">
+            <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
+            <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button>
+          </div>
+        )}
+        menuOpenId={menuOpenId}
+        onToggleMenu={setMenuOpenId}
+        menuRef={menuRef}
+        emptyState={<EmptyState title="No purchase returns" description="Nothing has been returned to a supplier yet." actionLabel="New Return" onAction={openCreate} />}
+        renderCell={renderCell}
+      />
+      <Pagination
+        page={page}
+        totalPages={Math.max(1, Math.ceil(total / pageSize))}
+        totalItems={total}
+        pageSize={pageSize}
+        pageSizeOptions={PAGE_SIZES}
+        onPageSizeChange={(v) => { setPage(1); setPageSize(v); }}
+        onPrev={() => setPage(Math.max(1, page - 1))}
+        onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))}
+      />
+
+      {formOpen ? (
+        <MasterModal
+          size="wide"
+          title="New Purchase Return"
+          description="Record what's going back to the supplier."
+          onClose={() => setFormOpen(false)}
+          footer={(
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={() => setFormOpen(false)}>Cancel</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save Return'}</button>
+            </>
+          )}
+        >
+          <div className="procurement-shell">
+            {formErrors.submit ? <div className="status-banner status-banner-error">{formErrors.submit}</div> : null}
+            <div className="procurement-grid">
+              <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
+              <FormField field={{ key: 'warehouse_id', label: 'Return-from Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'return_date', label: 'Return Date', type: 'date' }} value={formValues.return_date} error={formErrors.return_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+              <FormField field={{ key: 'reason', label: 'Reason', type: 'textarea' }} value={formValues.reason} error={formErrors.reason} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+            </div>
+
+            <div className="procurement-card">
+              <div className="procurement-toolbar">
+                <strong>Items</strong>
+                <AppButton variant="secondary" onClick={addItem}>Add Item</AppButton>
+              </div>
+              {formErrors.items ? <div className="status-banner status-banner-error">{formErrors.items}</div> : null}
+              <table className="procurement-items-table">
+                <thead><tr><th>Product</th><th>Quantity</th><th>Unit Price</th><th>Subtotal</th><th></th></tr></thead>
+                <tbody>
+                  {(formValues.items || []).map((item, index) => {
+                    const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
+                    return (
+                      <tr key={index}>
+                        <td>
+                          <SearchableSelect
+                            value={item.product_id || ''}
+                            onChange={(newValue) => updateItem(index, 'product_id', newValue)}
+                            options={productOptions}
+                            placeholder="Select product"
+                            searchPlaceholder="Search products..."
+                          />
+                        </td>
+                        <td><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
+                        <td><input type="number" min="0" step="0.01" value={item.unit_price || ''} onChange={(e) => updateItem(index, 'unit_price', e.target.value)} /></td>
+                        <td className="item-subtotal">{formatNumber(subtotal)}</td>
+                        <td>
+                          <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
+
+            <div className="procurement-summary">
+              <div className="procurement-summary-row"><span>Total</span><strong>{formatNumber(summaryTotal)}</strong></div>
+            </div>
+          </div>
+        </MasterModal>
+      ) : null}
+
+      {viewRecord ? (
+        <MasterModal
+          size="wide"
+          title={`Purchase Return: ${viewRecord.return_number}`}
+          description={`Supplier: ${viewRecord.supplier_name || '-'}`}
+          onClose={() => setViewRecord(null)}
+          footer={<button type="button" className="master-button master-button-secondary" onClick={() => setViewRecord(null)}>Close</button>}
+        >
+          <div className="detail-grid">
+            <div className="detail-item"><span className="detail-label">Warehouse</span><span className="detail-value">{viewRecord.warehouse_name || '-'}</span></div>
+            <div className="detail-item"><span className="detail-label">Return Date</span><span className="detail-value">{formatDate(viewRecord.return_date)}</span></div>
+            <div className="detail-item"><span className="detail-label">Original Voucher</span><span className="detail-value">{viewRecord.voucher_number || '-'}</span></div>
+            <div className="detail-item"><span className="detail-label">Reason</span><span className="detail-value">{viewRecord.reason || '-'}</span></div>
+          </div>
+          <table className="procurement-items-table" style={{ marginTop: '1rem' }}>
+            <thead><tr><th>Product</th><th>Quantity</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+            <tbody>
+              {(viewRecord.items || []).map((item) => (
+                <tr key={item.id}>
+                  <td>{item.product_name || `Product #${item.product_id}`}</td>
+                  <td>{formatNumber(item.quantity)}</td>
+                  <td>{formatNumber(item.unit_price)}</td>
+                  <td className="item-subtotal">{formatNumber(item.subtotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </MasterModal>
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete Purchase Return?"
+          description={`Are you sure you want to delete ${deleteTarget.return_number}? This reverses the stock and balance effect. This action cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
+          onConfirm={handleDeleteConfirm}
+          loading={saving}
+          error={deleteError}
+        />
+      ) : null}
+    </div>
+  );
+
+  if (embedded) return content;
+  return <div className="master-shell"><main className="master-content">{content}</main></div>;
+};
 
 const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => {
   const [orders, setOrders] = useState([]);
@@ -121,7 +444,9 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
   const [success, setSuccess] = useState('');
   const [error, setError] = useState('');
   const [menuOpenId, setMenuOpenId] = useState(null);
-  const [printSettings, setPrintSettings] = useState(null);
+  const [printSetups, setPrintSetups] = useState([]);
+  const [printPickerTarget, setPrintPickerTarget] = useState(null);
+  const [printPickerSetupId, setPrintPickerSetupId] = useState('');
   const [viewRecord, setViewRecord] = useState(null);
   const [viewRecordItems, setViewRecordItems] = useState([]);
   const [viewLoading, setViewLoading] = useState(false);
@@ -148,23 +473,18 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
 
   useEffect(() => {
     let cancelled = false;
-    fetchSettings(token)
-      .then((settings) => {
+    fetchPrintPageSetups(token)
+      .then((setups) => {
         if (cancelled) return;
-        setPrintSettings({
-          marginTop: settings.print_margin_top,
-          marginBottom: settings.print_margin_bottom,
-          marginLeft: settings.print_margin_left,
-          marginRight: settings.print_margin_right,
-          pageWidth: settings.print_page_width,
-          pageHeight: settings.print_page_height,
-        });
+        setPrintSetups(setups);
       })
       .catch(() => {
         // openPrintDocument falls back to sane A4 defaults if this never resolves.
       });
     return () => { cancelled = true; };
   }, [token]);
+
+  const defaultPrintSetup = printSetups.find((s) => s.is_default) || printSetups[0] || null;
 
   useEffect(() => {
     const handleOutside = (event) => {
@@ -425,7 +745,8 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
         id: row.id,
         po_number: row.po_number || '',
         supplier_id: String(row.supplier_id || ''),
-        order_date: row.order_date ? new Date(row.order_date).toISOString().slice(0, 10) : '',
+        order_date: row.order_date ? String(row.order_date).slice(0, 10) : '',
+        expected_date: row.expected_date ? String(row.expected_date).slice(0, 10) : '',
         remark: row.remark || '',
         items: [{ product_id: '', quantity: '1', unit_price: '0' }],
       });
@@ -451,7 +772,9 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
         po_id: String(row.po_id || ''),
         supplier_id: String(row.supplier_id || ''),
         warehouse_id: String(row.warehouse_id || ''),
-        voucher_date: row.voucher_date ? new Date(row.voucher_date).toISOString().slice(0, 10) : '',
+        voucher_date: row.voucher_date ? String(row.voucher_date).slice(0, 10) : '',
+        received_date: row.received_date ? String(row.received_date).slice(0, 10) : '',
+        quality_rating: row.quality_rating || 'good',
         remark: row.remark || '',
         discount_amount: String(row.discount_amount || '0'),
         tax_amount: String(row.tax_amount || '0'),
@@ -466,6 +789,8 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
                 product_id: String(item.product_id),
                 quantity: String(item.quantity),
                 unit_price: String(item.unit_price),
+                lot_number: item.lot_number || '',
+                expiry_date: item.expiry_date ? String(item.expiry_date).slice(0, 10) : '',
               })),
             }));
           }
@@ -595,10 +920,14 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
     }
   };
 
-  // Print
-  const handlePrint = async (row) => {
+  // Print - uses the given setup if one was explicitly chosen (see the
+  // "Print with Page Setup..." picker), otherwise falls back to whichever
+  // print page setup is marked default.
+  const handlePrint = async (row, setupId) => {
     setMenuOpenId(null);
+    setPrintPickerTarget(null);
     const isOrder = defaultTab === 'orders';
+    const chosenSetup = setupId ? printSetups.find((s) => String(s.id) === String(setupId)) : defaultPrintSetup;
     try {
       const data = isOrder ? await fetchPurchaseOrderById(token, row.id) : await fetchPurchaseVoucherById(token, row.id);
       const documentNumber = isOrder ? data.po_number : data.voucher_number;
@@ -628,7 +957,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
         items,
         totals,
         remark: data.remark,
-        pageSettings: printSettings,
+        pageSettings: toPageSettings(chosenSetup),
       });
 
       if (!opened) {
@@ -673,6 +1002,11 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
         break;
       case 'print':
         handlePrint(row);
+        break;
+      case 'print-with-setup':
+        setMenuOpenId(null);
+        setPrintPickerSetupId(defaultPrintSetup ? String(defaultPrintSetup.id) : '');
+        setPrintPickerTarget(row);
         break;
       default:
         break;
@@ -736,6 +1070,11 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
     return accumulator;
   }, {}), [products]);
 
+  const productOptions = useMemo(
+    () => products.map((product) => ({ value: String(product.id), label: product.name })),
+    [products]
+  );
+
   const renderForm = () => {
     const isOrder = formType === 'orders';
     const summaryTotal = (formValues.items || []).reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unit_price || 0)), 0);
@@ -776,6 +1115,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
                 <FormField field={{ key: 'po_number', label: 'PO Number', type: 'text', readOnly: true }} value={formValues.po_number || `PO-${Date.now()}`} error={formErrors.po_number} onChange={() => {}} />
                 <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
                 <FormField field={{ key: 'order_date', label: 'Order Date', type: 'date' }} value={formValues.order_date} error={formErrors.order_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+                <FormField field={{ key: 'expected_date', label: 'Expected Delivery Date', type: 'date' }} value={formValues.expected_date} error={formErrors.expected_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               </>
             ) : (
@@ -784,6 +1124,18 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
                 <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
                 <FormField field={{ key: 'warehouse_id', label: 'Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
                 <FormField field={{ key: 'voucher_date', label: 'Voucher Date', type: 'date' }} value={formValues.voucher_date} error={formErrors.voucher_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+                <FormField field={{ key: 'received_date', label: 'Received Date', type: 'date' }} value={formValues.received_date} error={formErrors.received_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+                <FormField
+                  field={{ key: 'quality_rating', label: 'Quality Rating', type: 'select', placeholder: 'Select rating' }}
+                  value={formValues.quality_rating}
+                  error={formErrors.quality_rating}
+                  onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))}
+                  options={[
+                    { value: 'good', label: 'Good' },
+                    { value: 'minor_issues', label: 'Minor Issues' },
+                    { value: 'rejected', label: 'Rejected' },
+                  ]}
+                />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               </>
             )}
@@ -801,6 +1153,12 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
                   <th>Product</th>
                   <th>Quantity</th>
                   <th>Unit Price</th>
+                  {isOrder ? null : (
+                    <>
+                      <th>Lot #</th>
+                      <th>Expiry Date</th>
+                    </>
+                  )}
                   <th>Subtotal</th>
                   <th></th>
                 </tr>
@@ -812,10 +1170,13 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
                   return (
                     <tr key={`${index}-${item.product_id}`}>
                       <td data-label="Product">
-                        <select value={item.product_id || ''} onChange={(event) => updateItem(index, 'product_id', event.target.value)}>
-                          <option value="">Select product</option>
-                          {products.map((productOption) => <option key={productOption.id} value={productOption.id}>{productOption.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={item.product_id || ''}
+                          onChange={(newValue) => updateItem(index, 'product_id', newValue)}
+                          options={productOptions}
+                          placeholder="Select product"
+                          searchPlaceholder="Search products..."
+                        />
                         {product ? <div className="field-hint">{product.name}</div> : null}
                       </td>
                       <td data-label="Quantity">
@@ -824,6 +1185,16 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
                       <td data-label="Unit Price">
                         <input type="number" min="1" step="0.01" value={item.unit_price || ''} onChange={(event) => updateItem(index, 'unit_price', event.target.value)} />
                       </td>
+                      {isOrder ? null : (
+                        <>
+                          <td data-label="Lot #">
+                            <input type="text" value={item.lot_number || ''} onChange={(event) => updateItem(index, 'lot_number', event.target.value)} placeholder="Optional" />
+                          </td>
+                          <td data-label="Expiry Date">
+                            <input type="date" value={item.expiry_date || ''} onChange={(event) => updateItem(index, 'expiry_date', event.target.value)} />
+                          </td>
+                        </>
+                      )}
                       <td data-label="Subtotal" className="item-subtotal">{formatNumber(subtotal)}</td>
                       <td data-label="">
                         <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
@@ -1279,6 +1650,12 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
             <span>Print</span>
           </button>
         )}
+        {isReceived && (
+          <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print-with-setup', row)}>
+            <PrinterIcon className="menu-icon" />
+            <span>Print with Page Setup...</span>
+          </button>
+        )}
 
         {isPending && (
           <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
@@ -1306,6 +1683,10 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
       <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print', row)}>
         <PrinterIcon className="menu-icon" />
         <span>Print</span>
+      </button>
+      <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print-with-setup', row)}>
+        <PrinterIcon className="menu-icon" />
+        <span>Print with Page Setup...</span>
       </button>
       <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
         <TrashIcon className="menu-icon" />
@@ -1404,6 +1785,10 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
     );
   };
 
+  if (defaultTab === 'returns') {
+    return <PurchaseReturnsTab token={token} onLogout={onLogout} embedded={embedded} suppliers={suppliers} warehouses={warehouses} products={products} />;
+  }
+
   const content = (
     <>
       {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Procurement', defaultTab === 'orders' ? 'Purchase Orders' : 'Purchase Vouchers']} title={defaultTab === 'orders' ? 'Purchase Orders' : 'Purchase Vouchers'} description={defaultTab === 'orders' ? 'Manage purchase orders and supplier assignments.' : 'Manage purchase vouchers and inventory receipts.'} actions={null} /> : null}
@@ -1426,6 +1811,30 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
           loading={saving}
           error={deleteError}
         />
+      ) : null}
+
+      {printPickerTarget ? (
+        <MasterModal
+          size="default"
+          title="Print with Page Setup"
+          description="Choose a page setup for this print job. Defaults to whichever setup is marked default."
+          onClose={() => setPrintPickerTarget(null)}
+          footer={(
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={() => setPrintPickerTarget(null)}>Cancel</button>
+              <button type="button" className="master-button master-button-primary" onClick={() => handlePrint(printPickerTarget, printPickerSetupId)}>Print</button>
+            </>
+          )}
+        >
+          <div className="form-field">
+            <label>Page Setup</label>
+            <select value={printPickerSetupId} onChange={(e) => setPrintPickerSetupId(e.target.value)}>
+              {printSetups.map((setup) => (
+                <option key={setup.id} value={setup.id}>{setup.name}{setup.is_default ? ' (Default)' : ''}</option>
+              ))}
+            </select>
+          </div>
+        </MasterModal>
       ) : null}
     </>
   );

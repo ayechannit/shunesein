@@ -37,6 +37,14 @@ export const fetchAuditLogs = async (token, params = {}) => {
   return buildRequest(`${API_ROOT}/audit?${query.toString()}`, token);
 };
 
+export const fetchActivitySummary = async (token, params = {}) => {
+  const query = new URLSearchParams();
+  if (params.from) query.set('from', params.from);
+  if (params.to) query.set('to', params.to);
+  const qs = query.toString();
+  return buildRequest(`${API_ROOT}/audit/summary${qs ? `?${qs}` : ''}`, token);
+};
+
 export const fetchUsersForFilter = async (token) => {
   const response = await buildRequest(`${API_ROOT}/user-management/users?page=1&limit=1000&sortBy=username&order=ASC`, token);
   return response.data || [];

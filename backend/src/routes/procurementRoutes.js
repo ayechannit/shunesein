@@ -22,4 +22,10 @@ router.post('/vouchers', verifyToken, guard, purchaseCtrl.createVoucher);
 router.put('/vouchers/:id', verifyToken, guard, purchaseCtrl.updateVoucher);
 router.delete('/vouchers/:id', verifyToken, guard, purchaseCtrl.deleteVoucher);
 
+// Purchase Returns / Debit Notes
+router.get('/returns', verifyToken, purchaseCtrl.getAllReturns);
+router.get('/returns/:id', verifyToken, purchaseCtrl.getReturnById);
+router.post('/returns', verifyToken, guard, purchaseCtrl.createReturn);
+router.delete('/returns/:id', verifyToken, guard, purchaseCtrl.deleteReturn);
+
 module.exports = router;

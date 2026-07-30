@@ -1,5 +1,6 @@
 const db = require('../config/db');
 const logAction = require('../utils/auditLogger');
+const { resolveDateRange } = require('../utils/dateUtils');
 
 const ALLOWED_SORT = ['id', 'timestamp', 'action', 'target_table', 'user_id'];
 
@@ -60,6 +61,47 @@ class AuditController {
       ]);
 
       res.json({ data: dataResult.rows, total: parseInt(countResult.rows[0].count), page: parseInt(page), limit: parseInt(limit) });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Activity Summary - who did what, how often, in a date range. The raw log
+  // (getAll) is a record-by-record trail; this is the rolled-up view a
+  // manager actually wants ("who's been active, and doing what") without
+  // reading every row.
+  getActivitySummary = async (req, res) => {
+    try {
+      const { from, to } = resolveDateRange(req.query.from, req.query.to);
+
+      const [byUser, byAction] = await Promise.all([
+        db.query(
+          `SELECT u.id as user_id, COALESCE(u.full_name, u.username, 'Unknown') as user_label,
+                  COUNT(*) as action_count, MAX(al.timestamp) as last_activity
+           FROM audit_logs al
+           LEFT JOIN users u ON al.user_id = u.id
+           WHERE al.timestamp >= $1 AND al.timestamp <= $2::date + interval '1 day'
+           GROUP BY u.id, user_label
+           ORDER BY action_count DESC`,
+          [from, to]
+        ),
+        db.query(
+          `SELECT action, COUNT(*) as action_count
+           FROM audit_logs al
+           WHERE al.timestamp >= $1 AND al.timestamp <= $2::date + interval '1 day'
+           GROUP BY action
+           ORDER BY action_count DESC`,
+          [from, to]
+        ),
+      ]);
+
+      res.json({
+        from,
+        to,
+        by_user: byUser.rows.map((row) => ({ ...row, action_count: parseInt(row.action_count, 10) })),
+        by_action: byAction.rows.map((row) => ({ ...row, action_count: parseInt(row.action_count, 10) })),
+        total_actions: byAction.rows.reduce((sum, row) => sum + parseInt(row.action_count, 10), 0),
+      });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

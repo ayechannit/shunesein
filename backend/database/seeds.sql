@@ -17,10 +17,12 @@ INSERT INTO permissions (name, module, description) VALUES
 ('manage_production', 'Production', 'Can manage production batches');
 
 -- Initial Product Types
+-- Fixed to exactly these two - there is no create/edit/delete UI or API for
+-- product types, since every product must be either a raw material consumed
+-- by production or a finished good produced by it.
 INSERT INTO product_types (name, description) VALUES
-('Uncategorized', 'Default product type for legacy or general items'),
-('Tea', 'Tea-based products'),
-('Fried Bean', 'Fried bean products');
+('Raw Material', 'Raw Material'),
+('Finished Goods', 'Finished Goods');
 
 -- Assign all permissions to Owner (Role ID 1)
 INSERT INTO role_permissions (role_id, permission_id)

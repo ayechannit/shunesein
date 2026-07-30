@@ -14,6 +14,10 @@ import {
   EyeIcon,
   CheckIcon,
   XCircleIcon,
+  SearchableSelect,
+  UploadIcon,
+  DownloadIcon,
+  PrinterIcon,
 } from '../components/masterData/MasterDataPrimitives';
 import {
   fetchProductionBatches,
@@ -31,27 +35,93 @@ import {
   submitStockCount,
   fetchProducts,
   fetchWarehouses,
+  fetchProductTypes,
 } from '../services/inventoryService';
+import { fetchPrintPageSetups, toPageSettings } from '../services/printSetupService';
+import { openPrintList } from '../utils/printDocument';
+import { formatDate, formatDateTime, todayLocal as today } from '../utils/datetime';
 
 const PAGE_SIZES = [5, 10, 20, 50];
-
-const formatDate = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleDateString();
-};
-
-const formatDateTime = (value) => {
-  if (!value) return '-';
-  const parsed = new Date(value);
-  return Number.isNaN(parsed.getTime()) ? String(value) : parsed.toLocaleString();
-};
 
 const formatNumber = (value) => {
   if (value === null || value === undefined || value === '') return '-';
   const numeric = Number(value);
   if (Number.isNaN(numeric)) return String(value);
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric);
+};
+
+// Minimal CSV helpers for the Stock Count export/import round trip - this
+// isn't table data going through the server-side master-data CSV pipeline,
+// just a browser-side "download a sheet, fill it in, upload it back" flow, so
+// it's self-contained here rather than reusing that unrelated pipeline.
+const csvEscapeField = (value) => {
+  const str = value === null || value === undefined ? '' : String(value);
+  return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
+};
+
+const toCsv = (headers, rows) => {
+  const lines = [headers.map(csvEscapeField).join(',')];
+  rows.forEach((row) => lines.push(row.map(csvEscapeField).join(',')));
+  return lines.join('\r\n');
+};
+
+const downloadCsv = (filename, csvContent) => {
+  // Leading UTF-8 BOM so Excel opens the file as UTF-8 instead of guessing a
+  // local codepage - without it, non-ASCII product names render as mojibake.
+  const blob = new Blob([`\uFEFF${csvContent}`], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement('a');
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  document.body.removeChild(link);
+  URL.revokeObjectURL(url);
+};
+
+// Handles quoted fields (so a product name containing a comma survives the
+// round trip) - a naive split(',') would silently corrupt those rows.
+const parseCsv = (text) => {
+  const rows = [];
+  let row = [];
+  let field = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < text.length; i += 1) {
+    const char = text[i];
+    if (inQuotes) {
+      if (char === '"') {
+        if (text[i + 1] === '"') { field += '"'; i += 1; } else { inQuotes = false; }
+      } else {
+        field += char;
+      }
+    } else if (char === '"') {
+      inQuotes = true;
+    } else if (char === ',') {
+      row.push(field);
+      field = '';
+    } else if (char === '\n' || char === '\r') {
+      if (char === '\r' && text[i + 1] === '\n') i += 1;
+      row.push(field);
+      rows.push(row);
+      row = [];
+      field = '';
+    } else {
+      field += char;
+    }
+  }
+  if (field !== '' || row.length > 0) {
+    row.push(field);
+    rows.push(row);
+  }
+
+  if (rows.length === 0) return [];
+  const headers = rows[0].map((h) => h.trim());
+  return rows.slice(1).filter((r) => r.some((cell) => cell.trim() !== '')).map((r) => {
+    const record = {};
+    headers.forEach((header, index) => { record[header] = r[index] !== undefined ? r[index].trim() : ''; });
+    return record;
+  });
 };
 
 const ADJUSTMENT_TYPES = [
@@ -64,6 +134,7 @@ const ADJUSTMENT_TYPES = [
 const Inventory = ({ token, onLogout, embedded = false, defaultTab = 'batches' }) => {
   const [products, setProducts] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
+  const [productTypes, setProductTypes] = useState([]);
   const menuRef = useRef(null);
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [pageSuccess, setPageSuccess] = useState('');
@@ -72,9 +143,14 @@ const Inventory = ({ token, onLogout, embedded = false, defaultTab = 'batches' }
   useEffect(() => {
     const loadLookups = async () => {
       try {
-        const [productData, warehouseData] = await Promise.all([fetchProducts(token), fetchWarehouses(token)]);
+        const [productData, warehouseData, productTypeData] = await Promise.all([
+          fetchProducts(token),
+          fetchWarehouses(token),
+          fetchProductTypes(token),
+        ]);
         setProducts(productData);
         setWarehouses(warehouseData);
+        setProductTypes(productTypeData.data || []);
       } catch {
         // ignore lookup errors for now
       }
@@ -100,7 +176,34 @@ const Inventory = ({ token, onLogout, embedded = false, defaultTab = 'batches' }
 
   const productMap = useMemo(() => products.reduce((acc, p) => { acc[p.id] = p; return acc; }, {}), [products]);
 
-  const shared = { token, onLogout, products, productMap, warehouses, menuRef, menuOpenId, setMenuOpenId, pageSuccess, setPageSuccess, pageError, setPageError };
+  const productTypeNameById = useMemo(
+    () => productTypes.reduce((acc, pt) => { acc[pt.id] = pt.name; return acc; }, {}),
+    [productTypes]
+  );
+
+  const productOptions = useMemo(
+    () => products.map((p) => ({ value: String(p.id), label: p.name })),
+    [products]
+  );
+
+  const rawMaterialOptions = useMemo(
+    () => products
+      .filter((p) => productTypeNameById[p.product_type_id] === 'Raw Material')
+      .map((p) => ({ value: String(p.id), label: p.name })),
+    [products, productTypeNameById]
+  );
+
+  const finishedGoodOptions = useMemo(
+    () => products
+      .filter((p) => productTypeNameById[p.product_type_id] === 'Finished Goods')
+      .map((p) => ({ value: String(p.id), label: p.name })),
+    [products, productTypeNameById]
+  );
+
+  const shared = {
+    token, onLogout, products, productMap, warehouses, menuRef, menuOpenId, setMenuOpenId, pageSuccess, setPageSuccess, pageError, setPageError,
+    productOptions, rawMaterialOptions, finishedGoodOptions,
+  };
 
   const titleFor = {
     batches: { title: 'Production Batches', description: 'Log production runs and track raw material usage.' },
@@ -134,7 +237,7 @@ const emptyBatchForm = () => ({
   raw_materials: [{ product_id: '', warehouse_id: '', quantity: '1', unit_cost: '0' }],
 });
 
-const ProductionBatchesTab = ({ token, onLogout, products, warehouses, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
+const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions, finishedGoodOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -266,7 +369,7 @@ const ProductionBatchesTab = ({ token, onLogout, products, warehouses, menuRef, 
   const openComplete = (row) => {
     setMenuOpenId(null);
     setCompleteTarget(row);
-    setCompleteItems([{ product_id: '', warehouse_id: '', quantity: '1', unit_cost: '0' }]);
+    setCompleteItems([{ product_id: '', warehouse_id: '', quantity: '1', unit_cost: '0', lot_number: '', expiry_date: '' }]);
     setCompleteError('');
   };
 
@@ -277,7 +380,7 @@ const ProductionBatchesTab = ({ token, onLogout, products, warehouses, menuRef, 
       return items;
     });
   };
-  const addCompleteItem = () => setCompleteItems((prev) => [...prev, { product_id: '', warehouse_id: '', quantity: '1', unit_cost: '0' }]);
+  const addCompleteItem = () => setCompleteItems((prev) => [...prev, { product_id: '', warehouse_id: '', quantity: '1', unit_cost: '0', lot_number: '', expiry_date: '' }]);
   const removeCompleteItem = (index) => setCompleteItems((prev) => prev.filter((_, i) => i !== index));
 
   const submitComplete = async () => {
@@ -296,6 +399,8 @@ const ProductionBatchesTab = ({ token, onLogout, products, warehouses, menuRef, 
           warehouse_id: Number(item.warehouse_id),
           quantity: Number(item.quantity),
           unit_cost: item.unit_cost ? Number(item.unit_cost) : null,
+          lot_number: item.lot_number || null,
+          expiry_date: item.expiry_date || null,
         })),
       });
       setPageSuccess('Batch completed.');
@@ -414,10 +519,13 @@ const ProductionBatchesTab = ({ token, onLogout, products, warehouses, menuRef, 
                   {formValues.raw_materials.map((item, index) => (
                     <tr key={index}>
                       <td>
-                        <select value={item.product_id} onChange={(e) => updateRawItem(index, 'product_id', e.target.value)}>
-                          <option value="">Select product</option>
-                          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={item.product_id}
+                          onChange={(newValue) => updateRawItem(index, 'product_id', newValue)}
+                          options={rawMaterialOptions}
+                          placeholder="Select raw material"
+                          searchPlaceholder="Search raw materials..."
+                        />
                         {formErrors[`rm-product-${index}`] ? <div className="field-error">{formErrors[`rm-product-${index}`]}</div> : null}
                       </td>
                       <td>
@@ -483,10 +591,17 @@ const ProductionBatchesTab = ({ token, onLogout, products, warehouses, menuRef, 
                 <strong>Finished Goods</strong>
                 {(viewRecord.finished_goods || []).length > 0 ? (
                   <table className="procurement-items-table">
-                    <thead><tr><th>Product</th><th>Warehouse</th><th>Quantity</th><th>Unit Cost</th></tr></thead>
+                    <thead><tr><th>Product</th><th>Warehouse</th><th>Quantity</th><th>Unit Cost</th><th>Lot #</th><th>Expiry Date</th></tr></thead>
                     <tbody>
                       {viewRecord.finished_goods.map((item) => (
-                        <tr key={item.id}><td>{item.product_name || `Product #${item.product_id}`}</td><td>{item.warehouse_name || '-'}</td><td>{formatNumber(item.quantity)}</td><td>{formatNumber(item.unit_cost)}</td></tr>
+                        <tr key={item.id}>
+                          <td>{item.product_name || `Product #${item.product_id}`}</td>
+                          <td>{item.warehouse_name || '-'}</td>
+                          <td>{formatNumber(item.quantity)}</td>
+                          <td>{formatNumber(item.unit_cost)}</td>
+                          <td>{item.lot_number || '-'}</td>
+                          <td>{item.expiry_date ? formatDate(item.expiry_date) : '-'}</td>
+                        </tr>
                       ))}
                     </tbody>
                   </table>
@@ -518,15 +633,18 @@ const ProductionBatchesTab = ({ token, onLogout, products, warehouses, menuRef, 
                 <AppButton variant="secondary" onClick={addCompleteItem}>Add Item</AppButton>
               </div>
               <table className="procurement-items-table">
-                <thead><tr><th>Product</th><th>Destination Warehouse</th><th>Quantity</th><th>Unit Cost</th><th></th></tr></thead>
+                <thead><tr><th>Product</th><th>Destination Warehouse</th><th>Quantity</th><th>Unit Cost</th><th>Lot #</th><th>Expiry Date</th><th></th></tr></thead>
                 <tbody>
                   {completeItems.map((item, index) => (
                     <tr key={index}>
                       <td>
-                        <select value={item.product_id} onChange={(e) => updateCompleteItem(index, 'product_id', e.target.value)}>
-                          <option value="">Select product</option>
-                          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={item.product_id}
+                          onChange={(newValue) => updateCompleteItem(index, 'product_id', newValue)}
+                          options={finishedGoodOptions}
+                          placeholder="Select finished good"
+                          searchPlaceholder="Search finished goods..."
+                        />
                       </td>
                       <td>
                         <select value={item.warehouse_id} onChange={(e) => updateCompleteItem(index, 'warehouse_id', e.target.value)}>
@@ -536,6 +654,8 @@ const ProductionBatchesTab = ({ token, onLogout, products, warehouses, menuRef, 
                       </td>
                       <td><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateCompleteItem(index, 'quantity', e.target.value)} /></td>
                       <td><input type="number" min="0" step="0.01" value={item.unit_cost} onChange={(e) => updateCompleteItem(index, 'unit_cost', e.target.value)} /></td>
+                      <td><input type="text" value={item.lot_number || ''} onChange={(e) => updateCompleteItem(index, 'lot_number', e.target.value)} placeholder="Optional" /></td>
+                      <td><input type="date" value={item.expiry_date || ''} onChange={(e) => updateCompleteItem(index, 'expiry_date', e.target.value)} /></td>
                       <td>
                         <button type="button" className="item-remove-btn" onClick={() => removeCompleteItem(index)} title="Remove item">
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
@@ -559,7 +679,7 @@ const emptyTransferForm = () => ({
   transfer_number: '',
   from_warehouse_id: '',
   to_warehouse_id: '',
-  date: '',
+  date: today(),
   remark: '',
   items: [{ product_id: '', quantity: '1' }],
 });
@@ -567,7 +687,7 @@ const emptyTransferForm = () => ({
 const TRANSFER_NEXT_STATUS = { pending: 'approved', approved: 'received', received: 'completed' };
 const TRANSFER_ACTION_LABEL = { pending: 'Approve', approved: 'Mark Received', received: 'Mark Completed' };
 
-const StockTransfersTab = ({ token, onLogout, products, warehouses, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
+const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -805,10 +925,13 @@ const StockTransfersTab = ({ token, onLogout, products, warehouses, menuRef, men
                   {formValues.items.map((item, index) => (
                     <tr key={index}>
                       <td>
-                        <select value={item.product_id} onChange={(e) => updateItem(index, 'product_id', e.target.value)}>
-                          <option value="">Select product</option>
-                          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={item.product_id}
+                          onChange={(newValue) => updateItem(index, 'product_id', newValue)}
+                          options={productOptions}
+                          placeholder="Select product"
+                          searchPlaceholder="Search products..."
+                        />
                         {formErrors[`item-product-${index}`] ? <div className="field-error">{formErrors[`item-product-${index}`]}</div> : null}
                       </td>
                       <td><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
@@ -872,12 +995,12 @@ const StockTransfersTab = ({ token, onLogout, products, warehouses, menuRef, men
 const emptyAdjustmentForm = () => ({
   adjustment_number: '',
   warehouse_id: '',
-  date: '',
+  date: today(),
   reason: '',
   items: [{ product_id: '', quantity: '1', type: 'manual' }],
 });
 
-const StockAdjustmentsTab = ({ token, onLogout, products, warehouses, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
+const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -1084,10 +1207,13 @@ const StockAdjustmentsTab = ({ token, onLogout, products, warehouses, menuRef, m
                   {formValues.items.map((item, index) => (
                     <tr key={index}>
                       <td>
-                        <select value={item.product_id} onChange={(e) => updateItem(index, 'product_id', e.target.value)}>
-                          <option value="">Select product</option>
-                          {products.map((p) => <option key={p.id} value={p.id}>{p.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={item.product_id}
+                          onChange={(newValue) => updateItem(index, 'product_id', newValue)}
+                          options={productOptions}
+                          placeholder="Select product"
+                          searchPlaceholder="Search products..."
+                        />
                         {formErrors[`item-product-${index}`] ? <div className="field-error">{formErrors[`item-product-${index}`]}</div> : null}
                       </td>
                       <td><input type="number" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} placeholder="e.g. -5 or 5" /></td>
@@ -1155,6 +1281,29 @@ const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageErr
   const [saving, setSaving] = useState(false);
   const [remark, setRemark] = useState('');
   const [localError, setLocalError] = useState('');
+  const [printSetups, setPrintSetups] = useState([]);
+  const [printSetupId, setPrintSetupId] = useState('');
+  const importInputRef = useRef(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    fetchPrintPageSetups(token)
+      .then((setups) => {
+        if (cancelled) return;
+        setPrintSetups(setups);
+      })
+      .catch(() => {
+        // openPrintList falls back to sane A4 defaults if this never resolves.
+      });
+    return () => { cancelled = true; };
+  }, [token]);
+
+  const defaultPrintSetup = printSetups.find((s) => s.is_default) || printSetups[0] || null;
+  const chosenPrintSetup = printSetupId
+    ? printSetups.find((s) => String(s.id) === String(printSetupId)) || defaultPrintSetup
+    : defaultPrintSetup;
+
+  const warehouseName = warehouses.find((w) => String(w.id) === String(warehouseId))?.name || '';
 
   const loadStock = async (id) => {
     if (!id) {
@@ -1211,6 +1360,80 @@ const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageErr
     }
   };
 
+  const handleExport = () => {
+    const headers = ['product_id', 'product_code', 'product_name', 'system_quantity', 'physical_quantity'];
+    const rows = stockRows.map((row) => [row.product_id, row.product_code || '', row.product_name, row.quantity, '']);
+    const safeWarehouseName = (warehouseName || 'warehouse').replace(/[^a-z0-9]+/gi, '-').toLowerCase();
+    downloadCsv(`stock-count-${safeWarehouseName}-${today()}.csv`, toCsv(headers, rows));
+  };
+
+  const handleImportFile = (event) => {
+    const file = event.target.files?.[0];
+    event.target.value = '';
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const records = parseCsv(String(reader.result || ''));
+        const stockRowIds = new Set(stockRows.map((row) => String(row.product_id)));
+        const nextCounts = {};
+        let matched = 0;
+        let skipped = 0;
+
+        records.forEach((record) => {
+          const productId = record.product_id;
+          const physicalQuantity = record.physical_quantity;
+          if (!productId || physicalQuantity === undefined || physicalQuantity === '') return;
+          if (!stockRowIds.has(String(productId))) { skipped += 1; return; }
+          if (Number.isNaN(Number(physicalQuantity))) { skipped += 1; return; }
+          nextCounts[productId] = physicalQuantity;
+          matched += 1;
+        });
+
+        setCounts((prev) => ({ ...prev, ...nextCounts }));
+        setLocalError('');
+        setPageSuccess(
+          skipped > 0
+            ? `Imported ${matched} counted row(s); ${skipped} row(s) skipped (unknown product or invalid quantity).`
+            : `Imported ${matched} counted row(s).`
+        );
+      } catch {
+        setLocalError('Unable to read that file - make sure it is a CSV exported from this screen.');
+      }
+    };
+    reader.readAsText(file);
+  };
+
+  const handlePrint = () => {
+    const opened = openPrintList({
+      documentTypeLabel: 'Stock Count Sheet',
+      documentNumber: `SC-${warehouseName || 'WAREHOUSE'}-${today()}`,
+      extraMeta: [
+        { label: 'Warehouse', value: warehouseName },
+        { label: 'Date', value: new Date().toLocaleDateString() },
+        { label: 'Counted By', value: '' },
+      ],
+      columns: [
+        { key: 'product_name', label: 'Product' },
+        { key: 'product_code', label: 'Code' },
+        { key: 'quantity', label: 'System Qty', align: 'right' },
+        { key: 'physical_quantity', label: 'Physical Qty', align: 'right', blank: true },
+        { key: 'difference', label: 'Difference', align: 'right', blank: true },
+      ],
+      rows: stockRows.map((row) => ({
+        product_name: row.product_name,
+        product_code: row.product_code || '-',
+        quantity: formatNumber(row.quantity),
+      })),
+      pageSettings: toPageSettings(chosenPrintSetup),
+    });
+
+    if (!opened) {
+      setLocalError('Popup blocked. Please allow popups for printing.');
+    }
+  };
+
   return (
     <div className="procurement-shell">
       <div className="procurement-grid">
@@ -1233,7 +1456,30 @@ const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageErr
         <div className="procurement-card">
           <div className="procurement-toolbar">
             <strong>Physical Count</strong>
-            {discrepancyCount > 0 ? <StatusBadge value={`${discrepancyCount} ${discrepancyCount === 1 ? 'discrepancy' : 'discrepancies'}`} type="warning" /> : null}
+            <div className="procurement-actions">
+              {discrepancyCount > 0 ? <StatusBadge value={`${discrepancyCount} ${discrepancyCount === 1 ? 'discrepancy' : 'discrepancies'}`} type="warning" /> : null}
+              <button type="button" className="master-button master-button-secondary" onClick={handleExport} disabled={stockRows.length === 0} title="Export to CSV">
+                <DownloadIcon className="button-icon" /><span>Export</span>
+              </button>
+              <button type="button" className="master-button master-button-secondary" onClick={() => importInputRef.current?.click()} disabled={stockRows.length === 0} title="Import counts from CSV">
+                <UploadIcon className="button-icon" /><span>Import</span>
+              </button>
+              <input ref={importInputRef} type="file" accept=".csv" hidden onChange={handleImportFile} />
+              {printSetups.length > 1 ? (
+                <select
+                  value={printSetupId || defaultPrintSetup?.id || ''}
+                  onChange={(e) => setPrintSetupId(e.target.value)}
+                  title="Page setup to print with"
+                >
+                  {printSetups.map((setup) => (
+                    <option key={setup.id} value={setup.id}>{setup.name}{setup.is_default ? ' (Default)' : ''}</option>
+                  ))}
+                </select>
+              ) : null}
+              <button type="button" className="master-button master-button-secondary" onClick={handlePrint} disabled={stockRows.length === 0} title="Print count sheet">
+                <PrinterIcon className="button-icon" /><span>Print</span>
+              </button>
+            </div>
           </div>
           {loading ? (
             <div className="status-banner">Loading current stock...</div>

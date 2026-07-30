@@ -21,6 +21,18 @@
   gap: 0.5rem;
 }
 
+/* Filter fields in a toolbar row (Reports date-range/product/warehouse
+   filters). flex-basis (not min-width) gives these a deterministic width
+   regardless of parent flex sizing - min-width alone only sets a floor and
+   still leaves the actual size to shrink-to-fit content, which for a
+   width:100% child of an auto-sized box is ambiguous and was rendering
+   inconsistently narrow. Shrinks on very small screens (flex-shrink stays
+   at its default 1) but never grows past its own content need. */
+.report-filter-field {
+  flex: 0 1 240px;
+  min-width: 220px;
+}
+
 /* ─── Form Grid ─── */
 .procurement-grid {
   display: grid;
@@ -101,6 +113,23 @@
   border-bottom: none;
 }
 
+/* The first column is always the product picker (Procurement, Sales, and
+   every Inventory item table put it first) and the last is always the
+   remove button - give the picker real room instead of letting table
+   auto-layout split space evenly with narrow quantity/cost/warehouse
+   columns, which squeezed both the trigger and its width-matched dropdown
+   panel down to an unreadable width. */
+.procurement-items-table th:first-child,
+.procurement-items-table td:first-child {
+  width: 32%;
+  min-width: 220px;
+}
+
+.procurement-items-table th:last-child,
+.procurement-items-table td:last-child {
+  width: 48px;
+}
+
 /* Item row inputs - match FormField styling */
 .procurement-items-table select,
 .procurement-items-table input[type="number"] {
@@ -136,6 +165,23 @@
   font-weight: 600;
   color: #0f172a;
   font-variant-numeric: tabular-nums;
+}
+
+/* Drill-down: a table cell that jumps to another report (e.g. a customer
+   name in Sales Summary opening that customer's Statement of Account). */
+.link-button {
+  background: none;
+  border: none;
+  padding: 0;
+  margin: 0;
+  font: inherit;
+  color: var(--md-primary, #2563eb);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.link-button:hover {
+  color: var(--md-info, #0284c7);
 }
 
 /* Remove button inline */
@@ -297,6 +343,16 @@
     flex-wrap: wrap;
   }
 
+  /* Rows are stacked blocks here, not table cells - matches the desktop
+     td:first-child/:last-child selector's specificity so this actually wins
+     and overrides their 32%/48px column widths, which would otherwise
+     squeeze these down instead of letting them fill the card row. */
+  .procurement-items-table tbody td:first-child,
+  .procurement-items-table tbody td:last-child {
+    width: auto;
+    min-width: 0;
+  }
+
   .procurement-items-table tbody td::before {
     content: attr(data-label);
     font-size: 12px;
@@ -313,7 +369,8 @@
   }
 
   .procurement-items-table select,
-  .procurement-items-table input[type="number"] {
+  .procurement-items-table input[type="number"],
+  .procurement-items-table .searchable-select-trigger {
     flex: 1;
     min-width: 0;
   }

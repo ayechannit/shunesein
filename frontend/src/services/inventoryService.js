@@ -97,3 +97,9 @@ export const submitStockCount = async (token, payload) =>
 
 // Products and warehouses are shared with Procurement - reused rather than duplicated here.
 export { fetchProducts, fetchWarehouses } from './procurementService';
+
+// Used to filter the product picker for Production: raw materials consumed
+// must be "Raw Material" type, finished goods produced must be "Finished
+// Goods" type. Read-only lookup - there is no create/edit/delete for product types.
+export const fetchProductTypes = async (token) =>
+  buildRequest(`${API_ROOT}/master/product-types?limit=100`, token);

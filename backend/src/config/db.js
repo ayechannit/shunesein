@@ -1,15 +1,20 @@
 const { Pool } = require('pg');
 require('dotenv').config();
 
+// '-c timezone=UTC' pins every connection's session timezone explicitly,
+// rather than relying on the host's default (which happens to be UTC on
+// Supabase today, but nothing before this line guaranteed it - see the
+// UTC datetime architecture doc).
 const pool = new Pool(
-  process.env.DB_URL 
-  ? { connectionString: process.env.DB_URL }
+  process.env.DB_URL
+  ? { connectionString: process.env.DB_URL, options: '-c timezone=UTC' }
   : {
       user: process.env.DB_USER || 'postgres',
       host: process.env.DB_HOST || 'localhost',
       database: process.env.DB_NAME || 'shunesein',
       password: process.env.DB_PASSWORD || 'postgres',
       port: process.env.DB_PORT || 5432,
+      options: '-c timezone=UTC',
     }
 );
 

@@ -1,3 +1,11 @@
+// Must be the very first thing that runs, before any other module loads.
+// Without this, every naive TIMESTAMP column value read from Postgres gets
+// silently misinterpreted as the host's local wall-clock time instead of
+// UTC (Node's pg driver has no custom type parsers, so it defers to the
+// process's own timezone) - confirmed as a live bug on this exact deployment,
+// not just a theoretical risk. See the UTC datetime architecture doc.
+process.env.TZ = 'UTC';
+
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
@@ -27,6 +35,7 @@ const inventoryRoutes = require("./routes/inventoryRoutes");
 const reportRoutes = require("./routes/reportRoutes");
 const miscRoutes = require("./routes/miscRoutes");
 const stockLedgerRoutes = require("./routes/stockLedgerRoutes");
+const pricingRoutes = require("./routes/pricingRoutes");
 const swaggerUi = require("swagger-ui-express");
 const swaggerDocument = require("../swagger.json");
 
@@ -43,6 +52,7 @@ app.use("/api/inventory", inventoryRoutes);
 app.use("/api/reports", reportRoutes);
 app.use("/api/misc", miscRoutes);
 app.use("/api/stock-ledger", stockLedgerRoutes);
+app.use("/api/pricing", pricingRoutes);
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Basic Route
