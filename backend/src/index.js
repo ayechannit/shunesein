@@ -17,7 +17,11 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(helmet());
-app.use(cors());
+// CORS_ORIGIN can be a comma-separated list of allowed origins (e.g. the
+// deployed frontend's Vercel URL). Falls back to allowing any origin so
+// local dev keeps working without extra setup.
+const corsOrigin = process.env.CORS_ORIGIN;
+app.use(cors(corsOrigin ? { origin: corsOrigin.split(",").map((o) => o.trim()) } : undefined));
 app.use(morgan("dev"));
 app.use(express.json());
 
@@ -63,6 +67,13 @@ app.get("/", (req, res) => {
   });
 });
 
-app.listen(PORT, () => {
-  console.log(`Server is running on port ${PORT}`);
-});
+// On Vercel the exported app is invoked per-request by the serverless
+// runtime, which never runs this file as `node src/index.js` - so guard
+// app.listen() to only bind a port during local/traditional server use.
+if (require.main === module) {
+  app.listen(PORT, () => {
+    console.log(`Server is running on port ${PORT}`);
+  });
+}
+
+module.exports = app;

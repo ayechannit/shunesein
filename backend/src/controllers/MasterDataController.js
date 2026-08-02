@@ -188,7 +188,7 @@ class MasterDataController {
   // Read (List with Search, Sort, Pagination)
   getAll = async (req, res) => {
     try {
-      let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'ASC' } = req.query;
+      let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'ASC', ...filterParams } = req.query;
       const parsedPage = Math.max(1, parseInt(page, 10) || 1);
       const parsedLimit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (parsedPage - 1) * parsedLimit;
@@ -197,18 +197,31 @@ class MasterDataController {
       const safeSortBy = MasterDataController.sanitizeSortField(this.tableName, sortBy, 'id');
       const selectClause = MasterDataController.buildSelectClause(this.tableName, allowedColumns);
 
-      let whereClause = '';
-      let params = [];
+      const conditions = [];
+      const params = [];
 
       if (search) {
         const validSearchFields = this.searchFields.filter((field) => allowedColumns.includes(field));
         if (validSearchFields.length > 0) {
           const searchValue = `%${String(search)}%`;
-          const searchPlaceholders = validSearchFields.map((_, i) => `${quoteIdentifier(validSearchFields[i])} ILIKE $${i + 1}`).join(' OR ');
-          whereClause = `WHERE ${searchPlaceholders}`;
-          params = validSearchFields.map(() => searchValue);
+          const searchConditions = validSearchFields.map((field) => {
+            params.push(searchValue);
+            return `${quoteIdentifier(field)} ILIKE $${params.length}`;
+          });
+          conditions.push(`(${searchConditions.join(' OR ')})`);
         }
       }
+
+      // Plain equality filters, e.g. ?product_type_id=2 for the Products
+      // "Product Type" dropdown - only honored for columns that actually
+      // exist on this table, so unrelated query params are silently ignored.
+      Object.entries(filterParams).forEach(([field, value]) => {
+        if (value === undefined || value === '' || !allowedColumns.includes(field)) return;
+        params.push(value);
+        conditions.push(`${quoteIdentifier(field)} = $${params.length}`);
+      });
+
+      const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
 
       const dataQuery = `
         SELECT ${selectClause} FROM ${quoteIdentifier(this.tableName)}

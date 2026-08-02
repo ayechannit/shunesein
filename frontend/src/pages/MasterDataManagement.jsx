@@ -33,8 +33,8 @@ import Delivery from './Delivery';
 import Reports from './Reports';
 import AuditLog from './AuditLog';
 import { formatDateTime, detectBrowserTimezone, listTimezones } from '../utils/datetime';
+import { API_ROOT } from '../config/api';
 
-const API_ROOT = 'http://localhost:5000/api';
 const PAGE_SIZES = [5, 10, 20, 50];
 
 const parseJwt = (token) => {
@@ -190,6 +190,7 @@ const createInitialModuleState = (moduleConfig) => ({
   pageSize: 10,
   searchDraft: '',
   searchQuery: '',
+  filterValues: {},
   sortValue: getSortValue(moduleConfig),
   loading: false,
   error: '',
@@ -536,6 +537,11 @@ const MasterDataManagement = ({ token, onLogout }) => {
         sortBy: stateSnapshot.sortValue.split('-')[0],
         order: stateSnapshot.sortValue.split('-')[1].toUpperCase(),
       });
+      Object.entries(stateSnapshot.filterValues || {}).forEach(([key, value]) => {
+        if (value !== '' && value !== undefined && value !== null) {
+          params.set(key, value);
+        }
+      });
       const response = await buildRequest(`${moduleConfig.apiBase}?${params.toString()}`, token);
 
       updateModuleState(moduleKey, {
@@ -607,7 +613,7 @@ const MasterDataManagement = ({ token, onLogout }) => {
 
     loadModuleData(activeModuleKey, stateSnapshot);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeModuleKey, activeState.page, activeState.pageSize, activeState.searchQuery, activeState.sortValue]);
+  }, [activeModuleKey, activeState.page, activeState.pageSize, activeState.searchQuery, activeState.sortValue, JSON.stringify(activeState.filterValues)]);
 
   useEffect(() => {
     const moduleConfig = activeModule;
@@ -664,7 +670,16 @@ const MasterDataManagement = ({ token, onLogout }) => {
       page: 1,
       searchDraft: '',
       searchQuery: '',
+      filterValues: {},
       sortValue: getSortValue(activeModule),
+    }));
+  };
+
+  const setFilterValue = (key, value) => {
+    updateActiveState((previous) => ({
+      ...previous,
+      page: 1,
+      filterValues: { ...previous.filterValues, [key]: value },
     }));
   };
 
@@ -1453,6 +1468,19 @@ const MasterDataManagement = ({ token, onLogout }) => {
                 }))
               }
               sortOptions={sortOptionsForConfig(activeModule)}
+              filters={(activeModule.filters || []).map((filter) => ({
+                key: filter.key,
+                label: filter.label,
+                value: activeState.filterValues?.[filter.key] ?? '',
+                onChange: (value) => setFilterValue(filter.key, value),
+                options: [
+                  { label: filter.allLabel || 'All', value: '' },
+                  ...(lookupCache[filter.lookupKey] || []).map((item) => ({
+                    label: item.name,
+                    value: String(item.id),
+                  })),
+                ],
+              }))}
               extraActions={
                 <button type="button" className="master-button master-button-secondary" onClick={() => loadModuleData(activeModuleKey, activeState)} title="Refresh">
                   <RefreshIcon className="button-icon" />

@@ -1,4 +1,4 @@
-const API_ROOT = 'http://localhost:5000/api';
+import { API_ROOT } from '../config/api';
 
 const buildRequest = async (url, token, options = {}) => {
   const response = await fetch(url, {

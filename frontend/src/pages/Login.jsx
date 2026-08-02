@@ -1,5 +1,6 @@
 import React, { useState } from 'react';
 import '../styles/Login.css';
+import { API_ROOT } from '../config/api';
 
 const Login = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('admin');
@@ -14,7 +15,7 @@ const Login = ({ onLoginSuccess }) => {
     setError('');
     
     try {
-      const response = await fetch('http://localhost:5000/api/auth/login', {
+      const response = await fetch(`${API_ROOT}/auth/login`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json'

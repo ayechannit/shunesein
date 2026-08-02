@@ -231,6 +231,7 @@ export const SearchToolbar = ({
   sortValue,
   onSortChange,
   sortOptions = [],
+  filters = [],
   extraActions,
 }) => (
   <section className="search-toolbar">
@@ -252,6 +253,23 @@ export const SearchToolbar = ({
             />
           </div>
         </div>
+
+        {filters.map((filter) => (
+          <div className="toolbar-field toolbar-field-filter" key={filter.key}>
+            <label htmlFor={`master-filter-${filter.key}`}>{filter.label}</label>
+            <select
+              id={`master-filter-${filter.key}`}
+              value={filter.value}
+              onChange={(event) => filter.onChange(event.target.value)}
+            >
+              {filter.options.map((option) => (
+                <option key={option.value || 'all'} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </div>
+        ))}
 
         <div className="toolbar-field toolbar-field-sort">
           <label htmlFor="master-sort">Sort</label>

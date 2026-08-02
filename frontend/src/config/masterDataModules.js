@@ -1,6 +1,6 @@
 import { listTimezones } from '../utils/datetime';
 
-const API_ROOT = 'http://localhost:5000/api';
+import { API_ROOT } from './api';
 
 const moneyField = {
   step: '0.01',
@@ -143,6 +143,11 @@ export const MASTER_DATA_MODULES = {
     actions: ['set-price', 'quantity-pricing'],
     // Enables row checkboxes + the "Set Price for N selected" bulk action.
     bulkPricing: true,
+    // Toolbar dropdown filter(s). `lookupKey` reuses the same lookup data
+    // already loaded for the form's Product Type select to build options.
+    filters: [
+      { key: 'product_type_id', label: 'Product Type', lookupKey: 'productTypes', allLabel: 'All' },
+    ],
     columns: [
       { key: 'product_code', label: 'Code', sortable: true },
       { key: 'name', label: 'Name', sortable: true },

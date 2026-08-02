@@ -1,7 +1,10 @@
 const express = require('express');
 const multer = require('multer');
+const os = require('os');
 const { checkPermission } = require('../middleware/auth');
-const upload = multer({ dest: 'uploads/' });
+// Serverless platforms (e.g. Vercel) only allow writes under the OS temp
+// dir - the project directory itself is read-only at runtime.
+const upload = multer({ dest: os.tmpdir() });
 
 // Reads (list/export/get one) stay open to any authenticated user.
 // Writes (create/update/delete/import) require `writePermission` when one is given.

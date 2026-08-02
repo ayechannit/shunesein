@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import Login from './pages/Login';
 import MasterDataManagement from './pages/MasterDataManagement';
+import { API_ROOT } from './config/api';
 import './App.css';
 
 function App() {
@@ -25,7 +26,7 @@ function App() {
       // Fire-and-forget: this is purely an audit entry (JWTs are stateless
       // here, nothing server-side to invalidate), so it must never block
       // actually logging the user out.
-      fetch('http://localhost:5000/api/auth/logout', {
+      fetch(`${API_ROOT}/auth/logout`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${currentToken}` },
       }).catch(() => {});
