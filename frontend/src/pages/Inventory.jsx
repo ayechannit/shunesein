@@ -614,7 +614,7 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
 
       {completeTarget ? (
         <MasterModal
-          size="wide"
+          size="full"
           title={`Complete Batch: ${completeTarget.batch_number}`}
           description="Record the finished goods this batch produced."
           onClose={() => setCompleteTarget(null)}

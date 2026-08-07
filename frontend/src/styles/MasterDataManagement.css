@@ -1025,8 +1025,12 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 .modal-full {
-  width: min(1000px, calc(100vw - 48px));
-  max-width: 1100px;
+  /* Wide enough that the densest items table (Complete Batch: Product +
+     Destination Warehouse + Quantity + Unit Cost + Lot # + Expiry Date +
+     remove, ~950px of column floors) fits without its own horizontal
+     scroll on typical desktop widths. */
+  width: min(1080px, calc(100vw - 48px));
+  max-width: 1180px;
 }
 
 .modal-header {

@@ -1092,7 +1092,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
 
     return (
       <MasterModal
-        size="wide"
+        size={isOrder ? 'wide' : 'full'}
         title={formMode === 'edit' ? `Edit ${isOrder ? 'Purchase Order' : 'Purchase Voucher'}` : (isOrder ? 'New Purchase Order' : 'New Purchase Voucher')}
         description={formMode === 'edit' ? `Update the ${isOrder ? 'purchase order' : 'purchase voucher'} details.` : (isOrder ? 'Create a purchase order and assign items.' : 'Create a purchase voucher and receive inventory.')}
         onClose={closeFormModal}
