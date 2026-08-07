@@ -280,19 +280,12 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
                 <label>Sales Invoices * {formValues.invoice_ids.length > 0 ? `(${formValues.invoice_ids.length} selected)` : ''}</label>
                 <input
                   type="text"
+                  className="picker-list-search"
                   value={invoicePickerFilter}
                   onChange={(e) => setInvoicePickerFilter(e.target.value)}
                   placeholder="Search invoice number or customer..."
-                  style={{ marginBottom: '8px' }}
                 />
-                <div
-                  style={{
-                    maxHeight: '220px',
-                    overflowY: 'auto',
-                    border: '1px solid var(--md-border-strong)',
-                    borderRadius: '8px',
-                  }}
-                >
+                <div className="picker-list">
                   {invoices
                     .filter((inv) => {
                       const term = invoicePickerFilter.trim().toLowerCase();
@@ -303,18 +296,7 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
                       );
                     })
                     .map((inv) => (
-                      <label
-                        key={inv.id}
-                        style={{
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: '8px',
-                          padding: '8px 10px',
-                          borderBottom: '1px solid var(--md-border)',
-                          cursor: 'pointer',
-                          fontSize: '13px',
-                        }}
-                      >
+                      <label key={inv.id} className="picker-list-item">
                         <input
                           type="checkbox"
                           checked={formValues.invoice_ids.includes(inv.id)}
@@ -324,7 +306,7 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
                       </label>
                     ))}
                   {invoices.length === 0 ? (
-                    <div style={{ padding: '10px', color: 'var(--md-muted)', fontSize: '13px' }}>No sales invoices available.</div>
+                    <div className="picker-list-empty">No sales invoices available.</div>
                   ) : null}
                 </div>
                 {formErrors.invoice_ids ? <div className="field-error">{formErrors.invoice_ids}</div> : null}

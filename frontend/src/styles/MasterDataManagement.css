@@ -44,6 +44,9 @@ html, #root { min-height: 100%; }
 
 button, input, select, textarea { font: inherit; }
 
+input[type="checkbox"],
+input[type="radio"] { accent-color: var(--md-primary); }
+
 /* ═══════════════════════════════════════════════════════════════
    LAYOUT — SINGLE BROWSER SCROLLBAR ONLY
    ═══════════════════════════════════════════════════════════════ */
@@ -776,6 +779,7 @@ tbody tr:last-child td { border-bottom: none; }
   box-shadow: 0 8px 24px rgba(15, 23, 42, 0.12);
   z-index: 1000;
   pointer-events: auto;
+  animation: dropdownEnter 140ms ease;
 }
 
 .dropdown-menu-list { display: grid; gap: 2px; }
@@ -787,7 +791,7 @@ tbody tr:last-child td { border-bottom: none; }
   width: 100%;
   padding: 8px 12px;
   border: 0;
-  border-radius: 8px;
+  border-radius: var(--md-radius);
   background: transparent;
   color: var(--md-text);
   text-align: left;
@@ -818,8 +822,8 @@ tbody tr:last-child td { border-bottom: none; }
   height: 38px;
   padding: 0 10px;
   border: 1px solid var(--md-border);
-  border-radius: 10px;
-  background: #fff;
+  border-radius: var(--md-radius);
+  background: var(--md-surface);
   color: var(--md-text);
   font-size: 14px;
   cursor: pointer;
@@ -851,7 +855,7 @@ tbody tr:last-child td { border-bottom: none; }
   padding: 6px 8px;
   margin-bottom: 6px;
   border: 1px solid var(--md-border);
-  border-radius: 8px;
+  border-radius: var(--md-radius);
   background: var(--md-bg);
 }
 .searchable-select-search-icon { width: 14px; height: 14px; color: var(--md-muted); flex-shrink: 0; }
@@ -1181,9 +1185,68 @@ tbody tr:last-child td { border-bottom: none; }
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
+/* ─── Picker List (e.g. Delivery's invoice checklist) ─── */
+.picker-list-search { margin-bottom: 8px; }
+
+.picker-list {
+  max-height: 220px;
+  overflow-y: auto;
+  border: 1px solid var(--md-border);
+  border-radius: var(--md-radius);
+}
+
+.picker-list-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 10px;
+  border-bottom: 1px solid var(--md-border);
+  cursor: pointer;
+  font-size: 13px;
+  transition: background 160ms ease;
+}
+.picker-list-item:last-child { border-bottom: none; }
+.picker-list-item:hover { background: var(--md-surface-soft); }
+
+.picker-list-empty {
+  padding: 10px;
+  color: var(--md-muted);
+  font-size: 13px;
+}
+
 /* ─── Permission Picker ─── */
-.permission-picker { display: grid; gap: 16px; }
+.permission-picker { display: grid; gap: 24px; }
 .permission-loading { padding: 16px 0; color: var(--md-muted); }
+
+.permission-group { display: grid; gap: 10px; }
+
+.permission-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--md-border);
+}
+
+.permission-group-header h3 {
+  margin: 0;
+  font-size: 13px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--md-muted);
+}
+
+.permission-group-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--md-primary);
+  cursor: pointer;
+}
 
 /* ═══════════════════════════════════════════════════════════════
    RECORD DETAIL VIEW — summary header, label/value grid
@@ -1371,6 +1434,11 @@ tbody tr:last-child td { border-bottom: none; }
 @keyframes fadeIn {
   from { opacity: 0; }
   to { opacity: 1; }
+}
+
+@keyframes dropdownEnter {
+  from { opacity: 0; transform: scale(0.97) translateY(-4px); }
+  to { opacity: 1; transform: scale(1) translateY(0); }
 }
 
 /* ═══════════════════════════════════════════════════════════════

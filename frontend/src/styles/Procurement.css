@@ -66,10 +66,26 @@
 }
 
 /* ─── Modern Items Table ─── */
+/* Horizontal-scrolls instead of letting the browser silently crush columns
+   when there are more columns than the modal has room for (e.g. the Purchase
+   Voucher variant adds Lot # + Expiry Date on top of the Purchase Order
+   columns) - min-width on the table forces that scroll instead of squeeze. */
+.procurement-items-table-wrap {
+  overflow-x: auto;
+}
+
 .procurement-items-table {
   width: 100%;
   border-collapse: separate;
   border-spacing: 0;
+}
+
+.procurement-items-table.has-lot-expiry {
+  min-width: 900px;
+}
+
+.procurement-items-table.has-warehouse-lot-expiry {
+  min-width: 950px;
 }
 
 .procurement-items-table thead th {
@@ -130,9 +146,36 @@
   width: 48px;
 }
 
-/* Item row inputs - match FormField styling */
+/* Quantity/Price/Lot/Expiry/Subtotal columns get a sane floor so their
+   inputs never shrink below a usable width - without this, table
+   auto-layout splits whatever space is left over evenly, which crushed the
+   date picker's mm/dd/yyyy text and the number inputs' spinners. */
+.procurement-items-table th.col-warehouse,
+.procurement-items-table td.col-warehouse { width: 160px; min-width: 150px; }
+
+.procurement-items-table th.col-qty,
+.procurement-items-table td.col-qty { width: 100px; min-width: 100px; }
+
+.procurement-items-table th.col-price,
+.procurement-items-table td.col-price { width: 130px; min-width: 130px; }
+
+.procurement-items-table th.col-lot,
+.procurement-items-table td.col-lot { width: 120px; min-width: 120px; }
+
+.procurement-items-table th.col-expiry,
+.procurement-items-table td.col-expiry { width: 160px; min-width: 160px; }
+
+.procurement-items-table th.col-subtotal,
+.procurement-items-table td.col-subtotal { width: 110px; min-width: 110px; }
+
+/* Item row inputs - match FormField styling. Covers every input type this
+   table actually uses (Quantity/Unit Price are number, Lot # is text,
+   Expiry Date is date) - text/date were previously left off this selector
+   and rendered as unstyled browser defaults next to the styled ones. */
 .procurement-items-table select,
-.procurement-items-table input[type="number"] {
+.procurement-items-table input[type="number"],
+.procurement-items-table input[type="text"],
+.procurement-items-table input[type="date"] {
   width: 100%;
   height: 38px;
   padding: 0 10px;
@@ -155,7 +198,9 @@
 }
 
 .procurement-items-table select:focus,
-.procurement-items-table input[type="number"]:focus {
+.procurement-items-table input[type="number"]:focus,
+.procurement-items-table input[type="text"]:focus,
+.procurement-items-table input[type="date"]:focus {
   border-color: #93c5fd;
   box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
@@ -191,16 +236,16 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid #e5e7eb;
-  border-radius: 10px;
-  background: #fff;
-  color: #dc2626;
+  border: 1px solid var(--md-border);
+  border-radius: var(--md-radius);
+  background: var(--md-surface);
+  color: var(--md-danger);
   cursor: pointer;
   transition: background 160ms ease, border-color 160ms ease;
 }
 
 .item-remove-btn:hover {
-  background: #fef2f2;
+  background: var(--md-danger-soft);
   border-color: #fecaca;
 }
 
@@ -370,8 +415,23 @@
 
   .procurement-items-table select,
   .procurement-items-table input[type="number"],
+  .procurement-items-table input[type="text"],
+  .procurement-items-table input[type="date"],
   .procurement-items-table .searchable-select-trigger {
     flex: 1;
+    min-width: 0;
+  }
+
+  /* The column-width floors that keep desktop columns from being crushed
+     would otherwise also apply here and stop these stacked rows from
+     filling the full card width. */
+  .procurement-items-table td.col-warehouse,
+  .procurement-items-table td.col-qty,
+  .procurement-items-table td.col-price,
+  .procurement-items-table td.col-lot,
+  .procurement-items-table td.col-expiry,
+  .procurement-items-table td.col-subtotal {
+    width: auto;
     min-width: 0;
   }
 

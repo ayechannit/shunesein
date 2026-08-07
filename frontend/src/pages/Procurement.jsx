@@ -1147,67 +1147,69 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
               <AppButton variant="secondary" onClick={addItem}>Add Item</AppButton>
             </div>
             {formErrors.items ? <div className="status-banner status-banner-error">{formErrors.items}</div> : null}
-            <table className="procurement-items-table">
-              <thead>
-                <tr>
-                  <th>Product</th>
-                  <th>Quantity</th>
-                  <th>Unit Price</th>
-                  {isOrder ? null : (
-                    <>
-                      <th>Lot #</th>
-                      <th>Expiry Date</th>
-                    </>
-                  )}
-                  <th>Subtotal</th>
-                  <th></th>
-                </tr>
-              </thead>
-              <tbody>
-                {(formValues.items || []).map((item, index) => {
-                  const product = selectedProducts[item.product_id];
-                  const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
-                  return (
-                    <tr key={`${index}-${item.product_id}`}>
-                      <td data-label="Product">
-                        <SearchableSelect
-                          value={item.product_id || ''}
-                          onChange={(newValue) => updateItem(index, 'product_id', newValue)}
-                          options={productOptions}
-                          placeholder="Select product"
-                          searchPlaceholder="Search products..."
-                        />
-                        {product ? <div className="field-hint">{product.name}</div> : null}
-                      </td>
-                      <td data-label="Quantity">
-                        <input type="number" min="1" value={item.quantity || ''} onChange={(event) => updateItem(index, 'quantity', event.target.value)} />
-                      </td>
-                      <td data-label="Unit Price">
-                        <input type="number" min="1" step="0.01" value={item.unit_price || ''} onChange={(event) => updateItem(index, 'unit_price', event.target.value)} />
-                      </td>
-                      {isOrder ? null : (
-                        <>
-                          <td data-label="Lot #">
-                            <input type="text" value={item.lot_number || ''} onChange={(event) => updateItem(index, 'lot_number', event.target.value)} placeholder="Optional" />
-                          </td>
-                          <td data-label="Expiry Date">
-                            <input type="date" value={item.expiry_date || ''} onChange={(event) => updateItem(index, 'expiry_date', event.target.value)} />
-                          </td>
-                        </>
-                      )}
-                      <td data-label="Subtotal" className="item-subtotal">{formatNumber(subtotal)}</td>
-                      <td data-label="">
-                        <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                            <path d="M18 6L6 18M6 6l12 12" />
-                          </svg>
-                        </button>
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className="procurement-items-table-wrap">
+              <table className={`procurement-items-table ${isOrder ? '' : 'has-lot-expiry'}`.trim()}>
+                <thead>
+                  <tr>
+                    <th>Product</th>
+                    <th className="col-qty">Quantity</th>
+                    <th className="col-price">Unit Price</th>
+                    {isOrder ? null : (
+                      <>
+                        <th className="col-lot">Lot #</th>
+                        <th className="col-expiry">Expiry Date</th>
+                      </>
+                    )}
+                    <th className="col-subtotal">Subtotal</th>
+                    <th></th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {(formValues.items || []).map((item, index) => {
+                    const product = selectedProducts[item.product_id];
+                    const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
+                    return (
+                      <tr key={`${index}-${item.product_id}`}>
+                        <td data-label="Product">
+                          <SearchableSelect
+                            value={item.product_id || ''}
+                            onChange={(newValue) => updateItem(index, 'product_id', newValue)}
+                            options={productOptions}
+                            placeholder="Select product"
+                            searchPlaceholder="Search products..."
+                          />
+                          {product ? <div className="field-hint">{product.name}</div> : null}
+                        </td>
+                        <td data-label="Quantity" className="col-qty">
+                          <input type="number" min="1" value={item.quantity || ''} onChange={(event) => updateItem(index, 'quantity', event.target.value)} />
+                        </td>
+                        <td data-label="Unit Price" className="col-price">
+                          <input type="number" min="1" step="0.01" value={item.unit_price || ''} onChange={(event) => updateItem(index, 'unit_price', event.target.value)} />
+                        </td>
+                        {isOrder ? null : (
+                          <>
+                            <td data-label="Lot #" className="col-lot">
+                              <input type="text" value={item.lot_number || ''} onChange={(event) => updateItem(index, 'lot_number', event.target.value)} placeholder="Optional" />
+                            </td>
+                            <td data-label="Expiry Date" className="col-expiry">
+                              <input type="date" value={item.expiry_date || ''} onChange={(event) => updateItem(index, 'expiry_date', event.target.value)} />
+                            </td>
+                          </>
+                        )}
+                        <td data-label="Subtotal" className="col-subtotal item-subtotal">{formatNumber(subtotal)}</td>
+                        <td data-label="">
+                          <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                              <path d="M18 6L6 18M6 6l12 12" />
+                            </svg>
+                          </button>
+                        </td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
           </div>
 
           <div className="procurement-summary">
@@ -1815,7 +1817,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders' 
 
       {printPickerTarget ? (
         <MasterModal
-          size="default"
           title="Print with Page Setup"
           description="Choose a page setup for this print job. Defaults to whichever setup is marked default."
           onClose={() => setPrintPickerTarget(null)}

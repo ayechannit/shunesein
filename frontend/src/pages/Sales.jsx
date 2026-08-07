@@ -1817,7 +1817,6 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
 
       {printPickerTarget ? (
         <MasterModal
-          size="default"
           title="Print with Page Setup"
           description="Choose a page setup for this print job. Defaults to whichever setup is marked default."
           onClose={() => setPrintPickerTarget(null)}

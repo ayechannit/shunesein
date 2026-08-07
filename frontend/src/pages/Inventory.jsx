@@ -632,39 +632,51 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
                 <strong>Finished Goods</strong>
                 <AppButton variant="secondary" onClick={addCompleteItem}>Add Item</AppButton>
               </div>
-              <table className="procurement-items-table">
-                <thead><tr><th>Product</th><th>Destination Warehouse</th><th>Quantity</th><th>Unit Cost</th><th>Lot #</th><th>Expiry Date</th><th></th></tr></thead>
-                <tbody>
-                  {completeItems.map((item, index) => (
-                    <tr key={index}>
-                      <td>
-                        <SearchableSelect
-                          value={item.product_id}
-                          onChange={(newValue) => updateCompleteItem(index, 'product_id', newValue)}
-                          options={finishedGoodOptions}
-                          placeholder="Select finished good"
-                          searchPlaceholder="Search finished goods..."
-                        />
-                      </td>
-                      <td>
-                        <select value={item.warehouse_id} onChange={(e) => updateCompleteItem(index, 'warehouse_id', e.target.value)}>
-                          <option value="">Select warehouse</option>
-                          {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                        </select>
-                      </td>
-                      <td><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateCompleteItem(index, 'quantity', e.target.value)} /></td>
-                      <td><input type="number" min="0" step="0.01" value={item.unit_cost} onChange={(e) => updateCompleteItem(index, 'unit_cost', e.target.value)} /></td>
-                      <td><input type="text" value={item.lot_number || ''} onChange={(e) => updateCompleteItem(index, 'lot_number', e.target.value)} placeholder="Optional" /></td>
-                      <td><input type="date" value={item.expiry_date || ''} onChange={(e) => updateCompleteItem(index, 'expiry_date', e.target.value)} /></td>
-                      <td>
-                        <button type="button" className="item-remove-btn" onClick={() => removeCompleteItem(index)} title="Remove item">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-                        </button>
-                      </td>
+              <div className="procurement-items-table-wrap">
+                <table className="procurement-items-table has-warehouse-lot-expiry">
+                  <thead>
+                    <tr>
+                      <th>Product</th>
+                      <th className="col-warehouse">Destination Warehouse</th>
+                      <th className="col-qty">Quantity</th>
+                      <th className="col-price">Unit Cost</th>
+                      <th className="col-lot">Lot #</th>
+                      <th className="col-expiry">Expiry Date</th>
+                      <th></th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {completeItems.map((item, index) => (
+                      <tr key={index}>
+                        <td data-label="Product">
+                          <SearchableSelect
+                            value={item.product_id}
+                            onChange={(newValue) => updateCompleteItem(index, 'product_id', newValue)}
+                            options={finishedGoodOptions}
+                            placeholder="Select finished good"
+                            searchPlaceholder="Search finished goods..."
+                          />
+                        </td>
+                        <td data-label="Destination Warehouse" className="col-warehouse">
+                          <select value={item.warehouse_id} onChange={(e) => updateCompleteItem(index, 'warehouse_id', e.target.value)}>
+                            <option value="">Select warehouse</option>
+                            {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                          </select>
+                        </td>
+                        <td data-label="Quantity" className="col-qty"><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateCompleteItem(index, 'quantity', e.target.value)} /></td>
+                        <td data-label="Unit Cost" className="col-price"><input type="number" min="0" step="0.01" value={item.unit_cost} onChange={(e) => updateCompleteItem(index, 'unit_cost', e.target.value)} /></td>
+                        <td data-label="Lot #" className="col-lot"><input type="text" value={item.lot_number || ''} onChange={(e) => updateCompleteItem(index, 'lot_number', e.target.value)} placeholder="Optional" /></td>
+                        <td data-label="Expiry Date" className="col-expiry"><input type="date" value={item.expiry_date || ''} onChange={(e) => updateCompleteItem(index, 'expiry_date', e.target.value)} /></td>
+                        <td data-label="">
+                          <button type="button" className="item-remove-btn" onClick={() => removeCompleteItem(index)} title="Remove item">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </MasterModal>

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
-import '../styles/MasterDataManagement.css';
+// Shared modal/button/form styles are imported once in main.jsx so every
+// page can rely on them, not just this one.
 import { MASTER_DATA_MODULES, MASTER_DATA_MODULE_ORDER } from '../config/masterDataModules';
 import {
   AppButton,
@@ -48,6 +49,15 @@ const parseJwt = (token) => {
     return null;
   }
 };
+
+// e.g. "manage_sales_invoices" -> "Manage Sales Invoices" - permission names
+// are snake_case identifiers matching the DB/route constants, not copy.
+const humanizePermissionName = (name = '') =>
+  name
+    .split('_')
+    .filter(Boolean)
+    .map((word) => word.charAt(0).toUpperCase() + word.slice(1))
+    .join(' ');
 
 const calculateSellingPriceFromValues = (values = {}) => {
   const costPrice = Number(values.cost_price);
@@ -451,6 +461,18 @@ const MasterDataManagement = ({ token, onLogout }) => {
     saving: false,
   });
   const [permissionOptions, setPermissionOptions] = useState([]);
+  // Grouped by module (e.g. all 7 Master Data item permissions together)
+  // instead of one flat list, so the picker stays scannable now that each
+  // module can hold several item-level permissions instead of just one.
+  const groupedPermissionOptions = useMemo(() => {
+    const groups = new Map();
+    permissionOptions.forEach((permission) => {
+      const moduleName = permission.module || 'General';
+      if (!groups.has(moduleName)) groups.set(moduleName, []);
+      groups.get(moduleName).push(permission);
+    });
+    return Array.from(groups.entries()).sort(([a], [b]) => a.localeCompare(b));
+  }, [permissionOptions]);
   const [pricingDialog, setPricingDialog] = useState({
     open: false,
     record: null,
@@ -1619,6 +1641,7 @@ const MasterDataManagement = ({ token, onLogout }) => {
 
       {permissionsDialog.open ? (
         <MasterModal
+          size="wide"
           title={`Role Permissions`}
           description={permissionsDialog.role ? `Assign permissions for ${permissionsDialog.role.name}.` : 'Select permissions for the role.'}
           onClose={() =>
@@ -1657,32 +1680,61 @@ const MasterDataManagement = ({ token, onLogout }) => {
             {permissionsDialog.loading ? (
               <div className="permission-loading">Loading permissions...</div>
             ) : (
-              <div className="permission-grid">
-                {permissionOptions.map((permission) => {
-                  const checked = permissionsDialog.selectedIds.includes(permission.id);
+              groupedPermissionOptions.map(([moduleName, items]) => {
+                const allChecked = items.every((permission) => permissionsDialog.selectedIds.includes(permission.id));
 
-                  return (
-                    <label key={permission.id} className={`permission-item ${checked ? 'is-selected' : ''}`}>
-                      <input
-                        type="checkbox"
-                        checked={checked}
-                        onChange={(event) =>
-                          setPermissionsDialog((previous) => ({
-                            ...previous,
-                            selectedIds: event.target.checked
-                              ? [...previous.selectedIds, permission.id]
-                              : previous.selectedIds.filter((id) => id !== permission.id),
-                          }))
-                        }
-                      />
-                      <span className="permission-copy">
-                        <strong>{permission.name}</strong>
-                        <small>{permission.module || 'General'}</small>
-                      </span>
-                    </label>
-                  );
-                })}
-              </div>
+                return (
+                  <div key={moduleName} className="permission-group">
+                    <div className="permission-group-header">
+                      <h3>{moduleName}</h3>
+                      <label className="permission-group-toggle">
+                        <input
+                          type="checkbox"
+                          checked={allChecked}
+                          onChange={(event) =>
+                            setPermissionsDialog((previous) => {
+                              const itemIds = items.map((permission) => permission.id);
+                              return {
+                                ...previous,
+                                selectedIds: event.target.checked
+                                  ? Array.from(new Set([...previous.selectedIds, ...itemIds]))
+                                  : previous.selectedIds.filter((id) => !itemIds.includes(id)),
+                              };
+                            })
+                          }
+                        />
+                        <span>Select all</span>
+                      </label>
+                    </div>
+                    <div className="permission-grid">
+                      {items.map((permission) => {
+                        const checked = permissionsDialog.selectedIds.includes(permission.id);
+
+                        return (
+                          <label key={permission.id} className={`permission-item ${checked ? 'is-selected' : ''}`}>
+                            <input
+                              type="checkbox"
+                              checked={checked}
+                              onChange={(event) =>
+                                setPermissionsDialog((previous) => ({
+                                  ...previous,
+                                  selectedIds: event.target.checked
+                                    ? [...previous.selectedIds, permission.id]
+                                    : previous.selectedIds.filter((id) => id !== permission.id),
+                                }))
+                              }
+                            />
+                            <span className="permission-copy">
+                              <strong>{humanizePermissionName(permission.name)}</strong>
+                              {permission.description ? <small>{permission.description}</small> : null}
+                            </span>
+                          </label>
+                        );
+                      })}
+                    </div>
+                  </div>
+                );
+              })
             )}
           </div>
         </MasterModal>

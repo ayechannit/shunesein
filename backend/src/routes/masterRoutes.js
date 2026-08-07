@@ -3,7 +3,16 @@ const printSetupCtrl = require('../controllers/PrintSetupController');
 const createMasterRouter = require('./masterRouterFactory');
 const express = require('express');
 const { verifyToken, checkPermission } = require('../middleware/auth');
-const { MANAGE_MASTER_DATA, MANAGE_SETTINGS } = require('../utils/permissions');
+const {
+  MANAGE_CATEGORIES,
+  MANAGE_PRODUCTS,
+  MANAGE_SUPPLIERS,
+  MANAGE_CUSTOMERS,
+  MANAGE_WAREHOUSES,
+  MANAGE_ACCOUNTS,
+  MANAGE_PAYMENT_METHODS,
+  MANAGE_SETTINGS,
+} = require('../utils/permissions');
 const router = express.Router();
 
 // Define Controllers for each Master Data table
@@ -17,13 +26,13 @@ const paymentMethodCtrl = new MasterDataController('payment_methods', ['name', '
 const productTypeCtrl = new MasterDataController('product_types', ['name']);
 
 // Register Routes
-router.use('/categories', verifyToken, createMasterRouter(categoryCtrl, MANAGE_MASTER_DATA));
-router.use('/products', verifyToken, createMasterRouter(productCtrl, MANAGE_MASTER_DATA));
-router.use('/suppliers', verifyToken, createMasterRouter(supplierCtrl, MANAGE_MASTER_DATA));
-router.use('/customers', verifyToken, createMasterRouter(customerCtrl, MANAGE_MASTER_DATA));
-router.use('/warehouses', verifyToken, createMasterRouter(warehouseCtrl, MANAGE_MASTER_DATA));
-router.use('/accounts', verifyToken, createMasterRouter(accountCtrl, MANAGE_MASTER_DATA));
-router.use('/payment-methods', verifyToken, createMasterRouter(paymentMethodCtrl, MANAGE_MASTER_DATA));
+router.use('/categories', verifyToken, createMasterRouter(categoryCtrl, MANAGE_CATEGORIES));
+router.use('/products', verifyToken, createMasterRouter(productCtrl, MANAGE_PRODUCTS));
+router.use('/suppliers', verifyToken, createMasterRouter(supplierCtrl, MANAGE_SUPPLIERS));
+router.use('/customers', verifyToken, createMasterRouter(customerCtrl, MANAGE_CUSTOMERS));
+router.use('/warehouses', verifyToken, createMasterRouter(warehouseCtrl, MANAGE_WAREHOUSES));
+router.use('/accounts', verifyToken, createMasterRouter(accountCtrl, MANAGE_ACCOUNTS));
+router.use('/payment-methods', verifyToken, createMasterRouter(paymentMethodCtrl, MANAGE_PAYMENT_METHODS));
 
 // Product types are fixed to "Raw Material" / "Finished Goods" - read-only
 // lookup for the Products form and Production pickers, no create/edit/delete
