@@ -17,11 +17,7 @@ const PORT = process.env.PORT || 5000;
 
 // Middleware
 app.use(helmet());
-// CORS_ORIGIN can be a comma-separated list of allowed origins (e.g. the
-// deployed frontend's Vercel URL). Falls back to allowing any origin so
-// local dev keeps working without extra setup.
-const corsOrigin = process.env.CORS_ORIGIN;
-app.use(cors(corsOrigin ? { origin: corsOrigin.split(",").map((o) => o.trim()) } : undefined));
+app.use(cors());
 app.use(morgan("dev"));
 app.use(express.json());
 
