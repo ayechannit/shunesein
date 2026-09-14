@@ -32,6 +32,8 @@ class DeliveryController {
   getAll = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'date', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       const whereClause = search
         ? 'WHERE d.delivery_number ILIKE $1 OR d.vehicle_info ILIKE $1 OR d.driver_name ILIKE $1 OR inv.invoice_numbers ILIKE $1'

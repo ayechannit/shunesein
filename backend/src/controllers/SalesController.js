@@ -9,6 +9,8 @@ class SalesController {
   getAllOrders = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE so_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -112,7 +114,7 @@ class SalesController {
           await client.query(itemQuery, [id, item.product_id, item.quantity, item.unit_price, item.discount_percent || 0]);
         }
 
-        await logAction(req.user.id, 'UPDATE', 'sale_orders', id, existing.rows[0], updated);
+        await logAction(req.user.id, 'UPDATE', 'sale_orders', id, existing.rows[0], updated, client);
         return updated;
       });
 
@@ -213,6 +215,8 @@ class SalesController {
   getAllInvoices = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE invoice_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -336,7 +340,7 @@ class SalesController {
         let cogsTotal = 0;
         for (const item of items) {
           const stockResult = await client.query(
-            'SELECT quantity FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2',
+            'SELECT quantity FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2 FOR UPDATE',
             [warehouse_id, item.product_id]
           );
           const availableQty = Number(stockResult.rows[0]?.quantity || 0);
@@ -394,7 +398,7 @@ class SalesController {
           ],
         });
 
-        await logAction(req.user.id, 'UPDATE', 'sales_invoices', id, existing.rows[0], updated);
+        await logAction(req.user.id, 'UPDATE', 'sales_invoices', id, existing.rows[0], updated, client);
         return updated;
       });
 
@@ -452,7 +456,7 @@ class SalesController {
         await reverseJournalEntries(client, { referenceType: 'sales_invoice', referenceId: id, description: `Deleted Sales Invoice ${invoiceRecord.invoice_number}`, createdBy: req.user.id });
 
         await client.query('DELETE FROM sales_invoices WHERE id = $1', [id]);
-        await logAction(req.user.id, 'DELETE', 'sales_invoices', id, invoiceRecord, null);
+        await logAction(req.user.id, 'DELETE', 'sales_invoices', id, invoiceRecord, null, client);
 
         return invoiceRecord;
       });
@@ -498,7 +502,7 @@ class SalesController {
           await client.query(itemQuery, [soRecord.id, item.product_id, item.quantity, item.unit_price, item.discount_percent || 0]);
         }
 
-        await logAction(req.user.id, 'CREATE', 'sale_orders', soRecord.id, null, soRecord);
+        await logAction(req.user.id, 'CREATE', 'sale_orders', soRecord.id, null, soRecord, client);
         return soRecord;
       });
 
@@ -596,7 +600,7 @@ class SalesController {
           ],
         });
 
-        await logAction(req.user.id, 'CREATE', 'sales_invoices', invoiceRecord.id, null, invoiceRecord);
+        await logAction(req.user.id, 'CREATE', 'sales_invoices', invoiceRecord.id, null, invoiceRecord, client);
         return invoiceRecord;
       });
 
@@ -613,6 +617,8 @@ class SalesController {
   getAllReturns = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE sr.return_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -736,7 +742,7 @@ class SalesController {
           ],
         });
 
-        await logAction(req.user.id, 'CREATE', 'sales_returns', returnRecord.id, null, returnRecord);
+        await logAction(req.user.id, 'CREATE', 'sales_returns', returnRecord.id, null, returnRecord, client);
         return returnRecord;
       });
 
@@ -785,7 +791,7 @@ class SalesController {
         await reverseJournalEntries(client, { referenceType: 'sales_return', referenceId: id, description: `Deleted Sales Return ${returnRecord.return_number}`, createdBy: req.user.id });
 
         await client.query('DELETE FROM sales_returns WHERE id = $1', [id]);
-        await logAction(req.user.id, 'DELETE', 'sales_returns', id, returnRecord, null);
+        await logAction(req.user.id, 'DELETE', 'sales_returns', id, returnRecord, null, client);
         return returnRecord;
       });
       res.json({ message: 'Sales return deleted successfully', data: ret });

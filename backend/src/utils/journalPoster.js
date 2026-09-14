@@ -129,4 +129,43 @@ const reverseJournalEntries = async (client, { referenceType, referenceId, date,
   }
 };
 
-module.exports = { postJournalEntry, reverseJournalEntries, ACCOUNT_CODES };
+// Shared by stock adjustments, stock counts, and production batch completion -
+// every one of these moves inventory value with no purchase/sale on the other
+// side, so previously none of them touched the GL at all (the Balance Sheet's
+// Inventory line could silently drift from the Inventory Valuation report as
+// soon as any of these happened). `valueIn` is inventory value gained (found
+// stock on a count/adjustment, or finished goods produced); `valueOut` is
+// inventory value lost (written-off stock, or raw materials consumed). Only
+// the difference between them (if any) hits P&L - if a production batch's
+// finished-goods value exactly matches its raw-material cost, this posts
+// nothing at all, same as journalPoster silently no-ops on a zero-value line.
+const postInventoryVarianceEntry = async (client, { date, referenceType, referenceId, description, createdBy, valueIn, valueOut }) => {
+  valueIn = Number(valueIn || 0);
+  valueOut = Number(valueOut || 0);
+  const variance = valueIn - valueOut;
+  // An exact match (valueIn === valueOut, e.g. production with zero yield
+  // variance) would otherwise post a self-canceling Dr/Cr Inventory pair for
+  // the same amount - balanced, but a no-op clutter entry. Skip it outright
+  // rather than relying on postJournalEntry's zero-line filter, which only
+  // catches a line that's zero on its own, not two equal-and-opposite ones.
+  if (valueIn === valueOut) return null;
+  return postJournalEntry(client, {
+    date,
+    referenceType,
+    referenceId,
+    description,
+    createdBy,
+    lines: [
+      { code: ACCOUNT_CODES.INVENTORY, debit: valueIn },
+      { code: ACCOUNT_CODES.INVENTORY, credit: valueOut },
+      // Found stock / a production overage is booked as non-operating income;
+      // written-off stock / production wastage is booked as an operating
+      // expense - both against the same generic buckets already used
+      // elsewhere in this system rather than adding dedicated accounts.
+      { code: ACCOUNT_CODES.OTHER_INCOME, credit: variance > 0 ? variance : 0 },
+      { code: ACCOUNT_CODES.OPERATING_EXPENSES, debit: variance < 0 ? -variance : 0 },
+    ],
+  });
+};
+
+module.exports = { postJournalEntry, reverseJournalEntries, postInventoryVarianceEntry, ACCOUNT_CODES };

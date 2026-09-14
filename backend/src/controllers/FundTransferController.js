@@ -8,6 +8,8 @@ class FundTransferController {
   getAll = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'date', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE ft.transfer_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -73,7 +75,7 @@ class FundTransferController {
         await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [numericAmount, from_account_id]);
         await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [numericAmount, to_account_id]);
 
-        await logAction(created_by, 'CREATE', 'fund_transfers', transferRecord.id, null, transferRecord);
+        await logAction(created_by, 'CREATE', 'fund_transfers', transferRecord.id, null, transferRecord, client);
         return transferRecord;
       });
 
@@ -111,7 +113,7 @@ class FundTransferController {
         await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [transfer.amount, transfer.to_account_id]);
 
         await client.query('DELETE FROM fund_transfers WHERE id = $1', [id]);
-        await logAction(req.user.id, 'DELETE', 'fund_transfers', id, transfer, null);
+        await logAction(req.user.id, 'DELETE', 'fund_transfers', id, transfer, null, client);
       });
 
       res.json({ message: 'Fund transfer deleted successfully' });

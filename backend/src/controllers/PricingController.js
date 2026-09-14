@@ -24,6 +24,8 @@ class PricingController {
   getAllTiers = async (req, res) => {
     try {
       let { page = 1, limit = 20, search = '', sortBy = 'product_name', order = 'ASC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 20);
       const offset = (page - 1) * limit;
 
       const conditions = [];

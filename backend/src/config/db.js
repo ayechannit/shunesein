@@ -5,9 +5,23 @@ require('dotenv').config();
 // rather than relying on the host's default (which happens to be UTC on
 // Supabase today, but nothing before this line guaranteed it - see the
 // UTC datetime architecture doc).
+//
+// max/idleTimeoutMillis matter a lot more here than on a long-lived server:
+// each Vercel serverless invocation can spin up its own process (and thus
+// its own pool), so an uncapped pool per-instance is how you exhaust a
+// hosted Postgres's connection limit under concurrent traffic. Keeping each
+// instance's pool small and quick to release connections, and pointing
+// DB_URL at a connection pooler (e.g. Supabase's port 6543 PgBouncer
+// endpoint, not the direct 5432 one) rather than raising this number, is
+// the actual fix for that class of problem.
 const pool = new Pool(
   process.env.DB_URL
-  ? { connectionString: process.env.DB_URL, options: '-c timezone=UTC' }
+  ? {
+      connectionString: process.env.DB_URL,
+      options: '-c timezone=UTC',
+      max: parseInt(process.env.DB_POOL_MAX, 10) || 5,
+      idleTimeoutMillis: 10000,
+    }
   : {
       user: process.env.DB_USER || 'postgres',
       host: process.env.DB_HOST || 'localhost',
@@ -15,6 +29,8 @@ const pool = new Pool(
       password: process.env.DB_PASSWORD || 'postgres',
       port: process.env.DB_PORT || 5432,
       options: '-c timezone=UTC',
+      max: parseInt(process.env.DB_POOL_MAX, 10) || 5,
+      idleTimeoutMillis: 10000,
     }
 );
 

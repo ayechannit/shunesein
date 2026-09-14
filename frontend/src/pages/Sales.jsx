@@ -102,7 +102,8 @@ const emptyReturnForm = () => ({
 // (unlike orders/invoices), so it doesn't share the isOrder-ternary state
 // the rest of this file is built around. See PurchaseReturnsTab in
 // Procurement.jsx for the mirror image of this on the purchasing side.
-const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, products }) => {
+const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, products, hasPermission = () => true }) => {
+  const canWrite = hasPermission('manage_sales_returns');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -268,7 +269,7 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
           extraActions={(
             <>
               <AppButton variant="secondary" onClick={load} iconLeft={<RefreshIcon className="button-icon" />}>Refresh</AppButton>
-              <AppButton variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="button-icon" />}>New Return</AppButton>
+              {canWrite ? <AppButton variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="button-icon" />}>New Return</AppButton> : null}
             </>
           )}
         />
@@ -281,13 +282,13 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
         renderRowActions={(row) => (
           <div className="dropdown-menu-list">
             <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
-            <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button>
+            {canWrite ? <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button> : null}
           </div>
         )}
         menuOpenId={menuOpenId}
         onToggleMenu={setMenuOpenId}
         menuRef={menuRef}
-        emptyState={<EmptyState title="No sales returns" description="Nothing has been returned yet." actionLabel="New Return" onAction={openCreate} />}
+        emptyState={<EmptyState title="No sales returns" description="Nothing has been returned yet." actionLabel={canWrite ? 'New Return' : undefined} onAction={canWrite ? openCreate : undefined} />}
         renderCell={renderCell}
       />
       <Pagination
@@ -415,7 +416,11 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
   return <div className="master-shell"><main className="master-content">{content}</main></div>;
 };
 
-const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => {
+const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPermission = () => true }) => {
+  const canWrite = hasPermission(defaultTab === 'orders' ? 'manage_sale_orders' : 'manage_sales_invoices');
+  // "Convert to Invoice" on an approved order creates an invoice, a
+  // separately-permissioned action from editing the order itself.
+  const canCreateInvoices = hasPermission('manage_sales_invoices');
   const [orders, setOrders] = useState([]);
   const [ordersTotal, setOrdersTotal] = useState(0);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -1626,21 +1631,21 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
           <span>View</span>
         </button>
 
-        {isPending && (
+        {canWrite && isPending && (
           <button type="button" className="dropdown-menu-item" onClick={() => handleAction('edit', row)}>
             <PencilIcon className="menu-icon" />
             <span>Edit</span>
           </button>
         )}
 
-        {isPending && (
+        {canWrite && isPending && (
           <button type="button" className="dropdown-menu-item" onClick={() => handleAction('approve', row)}>
             <CheckIcon className="menu-icon" />
             <span>Approve</span>
           </button>
         )}
 
-        {isApproved && (
+        {canCreateInvoices && isApproved && (
           <button type="button" className="dropdown-menu-item" onClick={() => handleAction('convert', row)}>
             <CopyIcon className="menu-icon" />
             <span>Convert to Invoice</span>
@@ -1660,14 +1665,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
           </button>
         )}
 
-        {isPending && (
+        {canWrite && isPending && (
           <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
             <TrashIcon className="menu-icon" />
             <span>Delete</span>
           </button>
         )}
 
-        {isPending && (
+        {canWrite && isPending && (
           <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('cancel', row)}>
             <XCircleIcon className="menu-icon" />
             <span>Cancel</span>
@@ -1691,10 +1696,12 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
         <PrinterIcon className="menu-icon" />
         <span>Print with Page Setup...</span>
       </button>
-      <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
-        <TrashIcon className="menu-icon" />
-        <span>Delete</span>
-      </button>
+      {canWrite ? (
+        <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
+          <TrashIcon className="menu-icon" />
+          <span>Delete</span>
+        </button>
+      ) : null}
     </div>
   );
 
@@ -1761,9 +1768,11 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
             }
           />
           <div className="procurement-actions">
-            <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={createAction}>
-              {listType === 'orders' ? 'New Sale Order' : 'New Sales Invoice'}
-            </AppButton>
+            {canWrite ? (
+              <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={createAction}>
+                {listType === 'orders' ? 'New Sale Order' : 'New Sales Invoice'}
+              </AppButton>
+            ) : null}
           </div>
         </div>
 
@@ -1779,7 +1788,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
             menuOpenId={menuOpenId}
             onToggleMenu={setMenuOpenId}
             menuRef={menuRef}
-            emptyState={<EmptyState title={listType === 'orders' ? 'No sale orders yet' : 'No sales invoices yet'} description="Create a new record to get started." actionLabel={listType === 'orders' ? 'New Sale Order' : 'New Sales Invoice'} onAction={createAction} />}
+            emptyState={<EmptyState title={listType === 'orders' ? 'No sale orders yet' : 'No sales invoices yet'} description="Create a new record to get started." actionLabel={canWrite ? (listType === 'orders' ? 'New Sale Order' : 'New Sales Invoice') : undefined} onAction={canWrite ? createAction : undefined} />}
             renderCell={renderCell}
           />
           <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} totalItems={total} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(value) => { if (listType === 'orders') { setOrdersPage(1); setOrdersPageSize(value); } else { setInvoicesPage(1); setInvoicesPageSize(value); } }} onPrev={() => { if (listType === 'orders') { setOrdersPage(Math.max(1, ordersPage - 1)); } else { setInvoicesPage(Math.max(1, invoicesPage - 1)); } }} onNext={() => { if (listType === 'orders') { setOrdersPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), ordersPage + 1)); } else { setInvoicesPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), invoicesPage + 1)); } }} />
@@ -1789,7 +1798,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders' }) => 
   };
 
   if (defaultTab === 'returns') {
-    return <SalesReturnsTab token={token} onLogout={onLogout} embedded={embedded} customers={customers} warehouses={warehouses} products={products} />;
+    return <SalesReturnsTab token={token} onLogout={onLogout} embedded={embedded} customers={customers} warehouses={warehouses} products={products} hasPermission={hasPermission} />;
   }
 
   const content = (

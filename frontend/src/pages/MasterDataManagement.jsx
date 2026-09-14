@@ -1,7 +1,8 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 // Shared modal/button/form styles are imported once in main.jsx so every
 // page can rely on them, not just this one.
 import { MASTER_DATA_MODULES, MASTER_DATA_MODULE_ORDER } from '../config/masterDataModules';
+import { canViewModule, canWriteModule } from '../config/modulePermissions';
 import {
   AppButton,
   AppIcon,
@@ -446,6 +447,13 @@ const MasterDataManagement = ({ token, onLogout }) => {
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [currentUser, setCurrentUser] = useState(null);
+  // null while loading - hasPermission fails closed until the real set
+  // arrives, so nav/buttons this user can't use never flash visible first.
+  const [permissionNames, setPermissionNames] = useState(null);
+  const hasPermission = useCallback(
+    (name) => (name ? Boolean(permissionNames && permissionNames.has(name)) : true),
+    [permissionNames],
+  );
   const [profileDialog, setProfileDialog] = useState({
     open: false,
     values: { full_name: '', timezone: 'UTC' },
@@ -994,6 +1002,34 @@ const MasterDataManagement = ({ token, onLogout }) => {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token]);
 
+  // Fetch the logged-in user's own role's permission set once, from the
+  // role_id already carried in the JWT - used to hide nav sections/buttons
+  // this user has no access to (previously nothing did this at all; every
+  // tab and every Create/Edit/Delete button rendered for every role). This
+  // is a UX improvement, not the security boundary - the backend already
+  // enforces every one of these permissions independently.
+  useEffect(() => {
+    let cancelled = false;
+    const roleId = decodedToken?.role_id;
+    if (!roleId) {
+      setPermissionNames(new Set());
+      return undefined;
+    }
+    buildRequest(`${API_ROOT}/user-management/roles/${roleId}/permissions`, token)
+      .then((rows) => {
+        if (cancelled) return;
+        setPermissionNames(new Set(rows.map((row) => row.name)));
+      })
+      .catch(() => {
+        if (cancelled) return;
+        // Fail closed - an empty set hides every gated nav item/button
+        // rather than guessing access on a failed request.
+        setPermissionNames(new Set());
+      });
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [token, decodedToken?.role_id]);
+
   const openProfileDialog = () => {
     if (!currentUser) return;
     setProfileDialog({
@@ -1359,6 +1395,23 @@ const MasterDataManagement = ({ token, onLogout }) => {
     return value === null || value === undefined || value === '' ? '-' : String(value);
   };
 
+  // Drops nav items (and whole sections, once empty) the current role can't
+  // view - report tabs the role has no view_report_* permission for, and the
+  // entire Access Control group unless the role can manage at least one of
+  // users/roles/settings. See config/modulePermissions.js.
+  const visibleSections = useMemo(
+    () =>
+      MASTER_SECTIONS
+        .map((section) => ({
+          ...section,
+          items: section.items.filter((item) => canViewModule(item.key, hasPermission)),
+        }))
+        .filter((section) => section.items.length > 0),
+    [hasPermission],
+  );
+
+  const canWriteActiveModule = canWriteModule(activeModuleKey, hasPermission);
+
   const pageActions = (
     <>
       {activeModule.bulkPricing && selectedRowIds.size > 0 ? (
@@ -1366,7 +1419,7 @@ const MasterDataManagement = ({ token, onLogout }) => {
           Set Price ({selectedRowIds.size})
         </AppButton>
       ) : null}
-      {!activeModule.readOnly ? (
+      {!activeModule.readOnly && canWriteActiveModule ? (
         <>
           <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>
             {activeModule.createButtonLabel}
@@ -1414,7 +1467,7 @@ const MasterDataManagement = ({ token, onLogout }) => {
     <div className="master-shell">
       <div className={`sidebar-backdrop ${sidebarOpen ? 'is-open' : ''}`} onClick={() => setSidebarOpen(false)} />
       <Sidebar
-        sections={MASTER_SECTIONS}
+        sections={visibleSections}
         activeKey={activeModuleKey}
         expandedSections={expandedSections}
         onToggleSection={(sectionKey) =>
@@ -1452,15 +1505,15 @@ const MasterDataManagement = ({ token, onLogout }) => {
         ) : null}
 
         {activeModule.renderType === 'procurement' ? (
-          <Procurement token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
+          <Procurement token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} hasPermission={hasPermission} />
         ) : activeModule.renderType === 'sales' ? (
-          <Sales token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
+          <Sales token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} hasPermission={hasPermission} />
         ) : activeModule.renderType === 'inventory' ? (
-          <Inventory token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
+          <Inventory token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} hasPermission={hasPermission} />
         ) : activeModule.renderType === 'finance' ? (
-          <Finance token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
+          <Finance token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} hasPermission={hasPermission} />
         ) : activeModule.renderType === 'delivery' ? (
-          <Delivery token={token} onLogout={onLogout} embedded />
+          <Delivery token={token} onLogout={onLogout} embedded hasPermission={hasPermission} />
         ) : activeModule.renderType === 'reports' ? (
           <Reports token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
         ) : activeModule.renderType === 'audit' ? (
@@ -1528,7 +1581,13 @@ const MasterDataManagement = ({ token, onLogout }) => {
                 columns={activeModule.columns}
                 rows={visibleRecords}
                 loading={activeState.loading}
-                rowActions={activeModule.readOnly ? (activeModule.actions || []) : (activeModule.actions ? ['edit', 'delete', ...activeModule.actions] : ['edit', 'delete'])}
+                rowActions={
+                  !canWriteActiveModule
+                    ? []
+                    : activeModule.readOnly
+                      ? (activeModule.actions || [])
+                      : (activeModule.actions ? ['edit', 'delete', ...activeModule.actions] : ['edit', 'delete'])
+                }
                 onEdit={openEdit}
                 onDelete={askDelete}
                 onExtraAction={handleExtraAction}
@@ -1544,8 +1603,8 @@ const MasterDataManagement = ({ token, onLogout }) => {
                   <EmptyState
                     title={activeModule.emptyState.title}
                     description={activeModule.emptyState.description}
-                    actionLabel={activeModule.createButtonLabel}
-                    onAction={openCreate}
+                    actionLabel={canWriteActiveModule ? activeModule.createButtonLabel : undefined}
+                    onAction={canWriteActiveModule ? openCreate : undefined}
                   />
                 }
                 renderCell={renderTableCell}

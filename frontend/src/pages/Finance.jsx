@@ -37,7 +37,7 @@ const formatNumber = (value) => {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric);
 };
 
-const Finance = ({ token, onLogout, embedded = false, defaultTab = 'entries' }) => {
+const Finance = ({ token, onLogout, embedded = false, defaultTab = 'entries', hasPermission = () => true }) => {
   const [accounts, setAccounts] = useState([]);
   const [categories, setCategories] = useState([]);
   const [pageSuccess, setPageSuccess] = useState('');
@@ -71,7 +71,7 @@ const Finance = ({ token, onLogout, embedded = false, defaultTab = 'entries' }) 
     return () => clearTimeout(timer);
   }, [pageSuccess]);
 
-  const shared = { token, onLogout, accounts, categories, menuRef, menuOpenId, setMenuOpenId, setPageSuccess };
+  const shared = { token, onLogout, accounts, categories, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, hasPermission };
 
   const titleFor = {
     entries: { title: 'Income & Expense', description: 'Log non-sales income and operational expenses against an account.' },
@@ -98,7 +98,8 @@ const Finance = ({ token, onLogout, embedded = false, defaultTab = 'entries' }) 
 
 const emptyEntryForm = () => ({ category_id: '', date: today(), amount: '', account_id: '', description: '' });
 
-const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId, setMenuOpenId, setPageSuccess }) => {
+const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, hasPermission }) => {
+  const canWrite = hasPermission('manage_finance_entries');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -210,10 +211,12 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
     return row[column.key] ?? '-';
   };
 
-  const renderActions = (row) => (
+  const renderActions = (row) => canWrite ? (
     <div className="dropdown-menu-list">
       <button type="button" className="dropdown-menu-item danger" onClick={() => handleDeleteRequest(row)}><TrashIcon className="menu-icon" /><span>Delete</span></button>
     </div>
+  ) : (
+    <div className="dropdown-menu-list"><span className="dropdown-menu-item" style={{ color: 'var(--md-muted)', cursor: 'default' }}>No actions available</span></div>
   );
 
   return (
@@ -236,7 +239,7 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
           extraActions={<button type="button" className="master-button master-button-secondary" onClick={load} title="Refresh"><RefreshIcon className="button-icon" /><span>Refresh</span></button>}
         />
         <div className="procurement-actions">
-          <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Entry</AppButton>
+          {canWrite ? <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Entry</AppButton> : null}
         </div>
       </div>
 
@@ -252,7 +255,7 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
           menuOpenId={menuOpenId}
           onToggleMenu={setMenuOpenId}
           menuRef={menuRef}
-          emptyState={<EmptyState title="No entries yet" description="Record an income or expense to get started." actionLabel="New Entry" onAction={openCreate} />}
+          emptyState={<EmptyState title="No entries yet" description="Record an income or expense to get started." actionLabel={canWrite ? 'New Entry' : undefined} onAction={canWrite ? openCreate : undefined} />}
           renderCell={renderCell}
         />
         <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} totalItems={total} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(v) => { setPage(1); setPageSize(v); }} onPrev={() => setPage(Math.max(1, page - 1))} onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))} />
@@ -326,7 +329,8 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
 
 const emptyTransferForm = () => ({ transfer_number: '', from_account_id: '', to_account_id: '', amount: '', date: today(), remark: '' });
 
-const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuOpenId, setPageSuccess }) => {
+const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, hasPermission }) => {
+  const canWrite = hasPermission('manage_finance_transfers');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -437,10 +441,12 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
     return row[column.key] ?? '-';
   };
 
-  const renderActions = (row) => (
+  const renderActions = (row) => canWrite ? (
     <div className="dropdown-menu-list">
       <button type="button" className="dropdown-menu-item danger" onClick={() => handleDeleteRequest(row)}><TrashIcon className="menu-icon" /><span>Delete</span></button>
     </div>
+  ) : (
+    <div className="dropdown-menu-list"><span className="dropdown-menu-item" style={{ color: 'var(--md-muted)', cursor: 'default' }}>No actions available</span></div>
   );
 
   return (
@@ -463,7 +469,7 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
           extraActions={<button type="button" className="master-button master-button-secondary" onClick={load} title="Refresh"><RefreshIcon className="button-icon" /><span>Refresh</span></button>}
         />
         <div className="procurement-actions">
-          <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Fund Transfer</AppButton>
+          {canWrite ? <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Fund Transfer</AppButton> : null}
         </div>
       </div>
 
@@ -479,7 +485,7 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
           menuOpenId={menuOpenId}
           onToggleMenu={setMenuOpenId}
           menuRef={menuRef}
-          emptyState={<EmptyState title="No fund transfers yet" description="Move money between accounts to get started." actionLabel="New Fund Transfer" onAction={openCreate} />}
+          emptyState={<EmptyState title="No fund transfers yet" description="Move money between accounts to get started." actionLabel={canWrite ? 'New Fund Transfer' : undefined} onAction={canWrite ? openCreate : undefined} />}
           renderCell={renderCell}
         />
         <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} totalItems={total} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(v) => { setPage(1); setPageSize(v); }} onPrev={() => setPage(Math.max(1, page - 1))} onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))} />

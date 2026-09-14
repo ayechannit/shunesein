@@ -2,6 +2,8 @@ const db = require('../config/db');
 const logAction = require('../utils/auditLogger');
 const recordStockTransaction = require('../utils/stockLogger');
 const HttpError = require('../utils/HttpError');
+const { postInventoryVarianceEntry } = require('../utils/journalPoster');
+const { todayUtcIsoDate } = require('../utils/dateUtils');
 
 const ALLOWED_SORT = {
   production_batches: ['id', 'batch_number', 'start_date', 'end_date', 'status', 'created_at'],
@@ -37,6 +39,8 @@ class InventoryController {
   getAllBatches = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'start_date', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE batch_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -107,7 +111,7 @@ class InventoryController {
           );
         }
 
-        await logAction(req.user.id, 'CREATE', 'production_batches', batchRecord.id, null, batchRecord);
+        await logAction(req.user.id, 'CREATE', 'production_batches', batchRecord.id, null, batchRecord, client);
         return batchRecord;
       });
 
@@ -173,6 +177,8 @@ class InventoryController {
             throw new HttpError(400, 'At least one finished good is required to complete a batch.');
           }
           await validateProductTypes(client, finished_goods.map((item) => item.product_id), 'Finished Goods');
+
+          let finishedGoodsValue = 0;
           for (const item of finished_goods) {
             await client.query(
               'INSERT INTO production_finished_goods (batch_id, product_id, quantity, warehouse_id, unit_cost, lot_number, expiry_date) VALUES ($1, $2, $3, $4, $5, $6, $7)',
@@ -183,11 +189,45 @@ class InventoryController {
               [item.warehouse_id, item.product_id, item.quantity]
             );
             await recordStockTransaction(client, item.product_id, item.warehouse_id, item.quantity, 'production', id);
+
+            let unitCost = Number(item.unit_cost || 0);
+            if (!unitCost) {
+              const productResult = await client.query('SELECT cost_price FROM products WHERE id = $1', [item.product_id]);
+              unitCost = Number(productResult.rows[0]?.cost_price || 0);
+            }
+            finishedGoodsValue += Number(item.quantity) * unitCost;
           }
+
+          const rawMaterialsResult = await client.query('SELECT product_id, quantity, unit_cost FROM production_raw_materials WHERE batch_id = $1', [id]);
+          let rawMaterialCost = 0;
+          for (const rm of rawMaterialsResult.rows) {
+            let unitCost = Number(rm.unit_cost || 0);
+            if (!unitCost) {
+              const productResult = await client.query('SELECT cost_price FROM products WHERE id = $1', [rm.product_id]);
+              unitCost = Number(productResult.rows[0]?.cost_price || 0);
+            }
+            rawMaterialCost += Number(rm.quantity) * unitCost;
+          }
+
+          // General Ledger: previously production never touched the GL at all.
+          // Raw materials consumed and finished goods produced both live in
+          // the same Inventory account in this system's simplified chart of
+          // accounts, so a batch is normally a wash - only a genuine yield
+          // variance (finished-goods value != raw-material cost) hits P&L.
+          // See journalPoster.postInventoryVarianceEntry.
+          await postInventoryVarianceEntry(client, {
+            date: todayUtcIsoDate(),
+            referenceType: 'production_batch',
+            referenceId: id,
+            description: `Production Batch ${oldBatch.batch_number} completed`,
+            createdBy: req.user.id,
+            valueIn: finishedGoodsValue,
+            valueOut: rawMaterialCost,
+          });
         }
 
         const result = await client.query('UPDATE production_batches SET status = $1, end_date = CURRENT_TIMESTAMP WHERE id = $2 RETURNING *', [status, id]);
-        await logAction(req.user.id, 'UPDATE', 'production_batches', id, oldBatch, result.rows[0]);
+        await logAction(req.user.id, 'UPDATE', 'production_batches', id, oldBatch, result.rows[0], client);
         return result.rows[0];
       });
 
@@ -204,6 +244,8 @@ class InventoryController {
   getAllTransfers = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'date', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE st.transfer_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -269,7 +311,7 @@ class InventoryController {
         for (const item of items) {
           await client.query('INSERT INTO stock_transfer_items (transfer_id, product_id, quantity) VALUES ($1, $2, $3)', [transferRecord.id, item.product_id, item.quantity]);
         }
-        await logAction(req.user.id, 'CREATE', 'stock_transfers', transferRecord.id, null, transferRecord);
+        await logAction(req.user.id, 'CREATE', 'stock_transfers', transferRecord.id, null, transferRecord, client);
         return transferRecord;
       });
 
@@ -332,7 +374,7 @@ class InventoryController {
         }
 
         const result = await client.query('UPDATE stock_transfers SET status = $1 WHERE id = $2 RETURNING *', [status, id]);
-        await logAction(req.user.id, 'UPDATE', 'stock_transfers', id, oldTransfer, result.rows[0]);
+        await logAction(req.user.id, 'UPDATE', 'stock_transfers', id, oldTransfer, result.rows[0], client);
         return result.rows[0];
       });
 
@@ -349,6 +391,8 @@ class InventoryController {
   getAllAdjustments = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'date', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE sa.adjustment_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -410,6 +454,9 @@ class InventoryController {
         );
         const adjustmentRecord = adjResult.rows[0];
 
+        let gainValue = 0;
+        let lossValue = 0;
+
         for (const item of items) {
           const quantity = Number(item.quantity);
 
@@ -430,9 +477,28 @@ class InventoryController {
             [warehouse_id, item.product_id, quantity]
           );
           await recordStockTransaction(client, item.product_id, warehouse_id, quantity, 'adjustment', adjustmentRecord.id);
+
+          const productResult = await client.query('SELECT cost_price FROM products WHERE id = $1', [item.product_id]);
+          const value = Math.abs(quantity) * Number(productResult.rows[0]?.cost_price || 0);
+          if (quantity > 0) gainValue += value; else if (quantity < 0) lossValue += value;
         }
 
-        await logAction(req.user.id, 'CREATE', 'stock_adjustments', adjustmentRecord.id, null, adjustmentRecord);
+        // General Ledger: previously stock adjustments never touched the GL at
+        // all, so the Balance Sheet's Inventory line could silently drift from
+        // the Inventory Valuation report. Found stock is booked as other
+        // income, written-off stock as an operating expense - see
+        // journalPoster.postInventoryVarianceEntry.
+        await postInventoryVarianceEntry(client, {
+          date: adjustmentRecord.date,
+          referenceType: 'stock_adjustment',
+          referenceId: adjustmentRecord.id,
+          description: `Stock Adjustment ${adjustmentRecord.adjustment_number}`,
+          createdBy: req.user.id,
+          valueIn: gainValue,
+          valueOut: lossValue,
+        });
+
+        await logAction(req.user.id, 'CREATE', 'stock_adjustments', adjustmentRecord.id, null, adjustmentRecord, client);
         return adjustmentRecord;
       });
 

@@ -1,5 +1,20 @@
 -- PostgreSQL Schema for Tea Leaf & Fried Bean Management System (Shunesein)
-
+--
+-- STALE - this is the original base schema only. It predates every file in
+-- migrations/ (currently 001-022) and is missing entire tables/features
+-- added since: chart_of_accounts, journal_entries, journal_entry_lines,
+-- product_price_tiers, print_page_setups, batch/lot/expiry columns, sales
+-- and purchase returns, schema_migrations, and more. Do not use this file
+-- alone to understand the current schema - run `npm run migrate` against a
+-- fresh database (which applies this file's tables are NOT auto-applied by
+-- that script - see below) or read migrations/ in order, 001 through the
+-- highest-numbered file, for the actual current shape.
+--
+-- In practice: a brand-new database needs this file run once by hand first
+-- (psql -f schema.sql) to create the base tables, then `npm run migrate` to
+-- apply every migration on top - the migrate script only tracks/applies
+-- migrations/*.sql, it doesn't know about this file.
+--
 -- Enable UUID extension if needed
 CREATE EXTENSION IF NOT EXISTS "uuid-ossp";
 

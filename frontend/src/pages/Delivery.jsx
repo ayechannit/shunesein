@@ -31,7 +31,8 @@ const NEXT_STATUS_ACTIONS = {
   shipped: [{ status: 'delivered', label: 'Mark Delivered' }, { status: 'failed', label: 'Mark Failed' }],
 };
 
-const Delivery = ({ token, onLogout, embedded = false }) => {
+const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => true }) => {
+  const canWrite = hasPermission('manage_delivery');
   const [invoices, setInvoices] = useState([]);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -184,7 +185,7 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
   };
 
   const renderActions = (row) => {
-    const nextActions = NEXT_STATUS_ACTIONS[row.status] || [];
+    const nextActions = canWrite ? (NEXT_STATUS_ACTIONS[row.status] || []) : [];
     if (nextActions.length === 0) {
       return <div className="dropdown-menu-list"><span className="dropdown-menu-item" style={{ color: 'var(--md-muted)', cursor: 'default' }}>No actions available</span></div>;
     }
@@ -230,7 +231,9 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
             extraActions={<button type="button" className="master-button master-button-secondary" onClick={load} title="Refresh"><RefreshIcon className="button-icon" /><span>Refresh</span></button>}
           />
           <div className="procurement-actions">
-            <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Delivery</AppButton>
+            {canWrite ? (
+              <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Delivery</AppButton>
+            ) : null}
           </div>
         </div>
 
@@ -246,7 +249,7 @@ const Delivery = ({ token, onLogout, embedded = false }) => {
             menuOpenId={menuOpenId}
             onToggleMenu={setMenuOpenId}
             menuRef={menuRef}
-            emptyState={<EmptyState title="No deliveries yet" description="Schedule a delivery to get started." actionLabel="New Delivery" onAction={openCreate} />}
+            emptyState={<EmptyState title="No deliveries yet" description="Schedule a delivery to get started." actionLabel={canWrite ? 'New Delivery' : undefined} onAction={canWrite ? openCreate : undefined} />}
             renderCell={renderCell}
           />
           <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} totalItems={total} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(v) => { setPage(1); setPageSize(v); }} onPrev={() => setPage(Math.max(1, page - 1))} onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))} />

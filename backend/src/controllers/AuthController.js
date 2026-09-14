@@ -2,6 +2,7 @@ const db = require('../config/db');
 const bcrypt = require('bcryptjs');
 const jwt = require('jsonwebtoken');
 const logAction = require('../utils/auditLogger');
+const { JWT_SECRET } = require('../config/jwt');
 
 class AuthController {
   login = async (req, res) => {
@@ -30,7 +31,7 @@ class AuthController {
 
       const token = jwt.sign(
         { id: user.id, username: user.username, role_id: user.role_id, role_name: user.role_name },
-        process.env.JWT_SECRET || 'your_jwt_secret',
+        JWT_SECRET,
         { expiresIn: '1d' }
       );
 

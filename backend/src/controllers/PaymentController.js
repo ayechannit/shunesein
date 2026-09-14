@@ -14,6 +14,8 @@ class PaymentController {
   getAll = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'payment_date', order = 'DESC', transaction_type, transaction_id } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
 
       const conditions = [];
@@ -175,7 +177,7 @@ class PaymentController {
               ],
         });
 
-        await logAction(created_by, 'CREATE', 'payments', payment.id, null, payment);
+        await logAction(created_by, 'CREATE', 'payments', payment.id, null, payment, client);
 
         return { payment, remainingBalance: Math.round((remaining - numericAmount) * 100) / 100, status: newStatus };
       });
@@ -243,7 +245,7 @@ class PaymentController {
 
         await reverseJournalEntries(client, { referenceType: 'payment', referenceId: id, description: 'Deleted payment', createdBy: req.user.id });
 
-        await logAction(req.user.id, 'DELETE', 'payments', id, paymentRecord, null);
+        await logAction(req.user.id, 'DELETE', 'payments', id, paymentRecord, null, client);
 
         return paymentRecord;
       });

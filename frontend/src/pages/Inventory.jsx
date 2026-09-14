@@ -131,7 +131,7 @@ const ADJUSTMENT_TYPES = [
   { value: 'manual', label: 'Manual Adjustment' },
 ];
 
-const Inventory = ({ token, onLogout, embedded = false, defaultTab = 'batches' }) => {
+const Inventory = ({ token, onLogout, embedded = false, defaultTab = 'batches', hasPermission = () => true }) => {
   const [products, setProducts] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [productTypes, setProductTypes] = useState([]);
@@ -202,7 +202,7 @@ const Inventory = ({ token, onLogout, embedded = false, defaultTab = 'batches' }
 
   const shared = {
     token, onLogout, products, productMap, warehouses, menuRef, menuOpenId, setMenuOpenId, pageSuccess, setPageSuccess, pageError, setPageError,
-    productOptions, rawMaterialOptions, finishedGoodOptions,
+    productOptions, rawMaterialOptions, finishedGoodOptions, hasPermission,
   };
 
   const titleFor = {
@@ -237,7 +237,8 @@ const emptyBatchForm = () => ({
   raw_materials: [{ product_id: '', warehouse_id: '', quantity: '1', unit_cost: '0' }],
 });
 
-const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions, finishedGoodOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
+const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions, finishedGoodOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError, hasPermission }) => {
+  const canWrite = hasPermission('manage_production');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -433,9 +434,9 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
     return (
       <div className="dropdown-menu-list">
         <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
-        {status === 'pending' && <button type="button" className="dropdown-menu-item" onClick={() => handleStart(row)}><CheckIcon className="menu-icon" /><span>Start Production</span></button>}
-        {status === 'in_progress' && <button type="button" className="dropdown-menu-item" onClick={() => openComplete(row)}><CheckIcon className="menu-icon" /><span>Complete</span></button>}
-        {(status === 'pending' || status === 'in_progress') && <button type="button" className="dropdown-menu-item danger" onClick={() => handleCancel(row)}><XCircleIcon className="menu-icon" /><span>Cancel</span></button>}
+        {canWrite && status === 'pending' && <button type="button" className="dropdown-menu-item" onClick={() => handleStart(row)}><CheckIcon className="menu-icon" /><span>Start Production</span></button>}
+        {canWrite && status === 'in_progress' && <button type="button" className="dropdown-menu-item" onClick={() => openComplete(row)}><CheckIcon className="menu-icon" /><span>Complete</span></button>}
+        {canWrite && (status === 'pending' || status === 'in_progress') && <button type="button" className="dropdown-menu-item danger" onClick={() => handleCancel(row)}><XCircleIcon className="menu-icon" /><span>Cancel</span></button>}
       </div>
     );
   };
@@ -460,7 +461,7 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
           extraActions={<button type="button" className="master-button master-button-secondary" onClick={load} title="Refresh"><RefreshIcon className="button-icon" /><span>Refresh</span></button>}
         />
         <div className="procurement-actions">
-          <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Production Batch</AppButton>
+          {canWrite ? <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Production Batch</AppButton> : null}
         </div>
       </div>
 
@@ -476,7 +477,7 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
           menuOpenId={menuOpenId}
           onToggleMenu={setMenuOpenId}
           menuRef={menuRef}
-          emptyState={<EmptyState title="No production batches yet" description="Log a production run to get started." actionLabel="New Production Batch" onAction={openCreate} />}
+          emptyState={<EmptyState title="No production batches yet" description="Log a production run to get started." actionLabel={canWrite ? 'New Production Batch' : undefined} onAction={canWrite ? openCreate : undefined} />}
           renderCell={renderCell}
         />
         <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} totalItems={total} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(v) => { setPage(1); setPageSize(v); }} onPrev={() => setPage(Math.max(1, page - 1))} onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))} />
@@ -699,7 +700,8 @@ const emptyTransferForm = () => ({
 const TRANSFER_NEXT_STATUS = { pending: 'approved', approved: 'received', received: 'completed' };
 const TRANSFER_ACTION_LABEL = { pending: 'Approve', approved: 'Mark Received', received: 'Mark Completed' };
 
-const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
+const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError, hasPermission }) => {
+  const canWrite = hasPermission('manage_stock');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -833,7 +835,7 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
     return (
       <div className="dropdown-menu-list">
         <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
-        {nextLabel && <button type="button" className="dropdown-menu-item" onClick={() => handleAdvance(row)}><CheckIcon className="menu-icon" /><span>{nextLabel}</span></button>}
+        {canWrite && nextLabel && <button type="button" className="dropdown-menu-item" onClick={() => handleAdvance(row)}><CheckIcon className="menu-icon" /><span>{nextLabel}</span></button>}
       </div>
     );
   };
@@ -858,7 +860,7 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
           extraActions={<button type="button" className="master-button master-button-secondary" onClick={load} title="Refresh"><RefreshIcon className="button-icon" /><span>Refresh</span></button>}
         />
         <div className="procurement-actions">
-          <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Stock Transfer</AppButton>
+          {canWrite ? <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Stock Transfer</AppButton> : null}
         </div>
       </div>
 
@@ -874,7 +876,7 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
           menuOpenId={menuOpenId}
           onToggleMenu={setMenuOpenId}
           menuRef={menuRef}
-          emptyState={<EmptyState title="No stock transfers yet" description="Create a transfer to move inventory between warehouses." actionLabel="New Stock Transfer" onAction={openCreate} />}
+          emptyState={<EmptyState title="No stock transfers yet" description="Create a transfer to move inventory between warehouses." actionLabel={canWrite ? 'New Stock Transfer' : undefined} onAction={canWrite ? openCreate : undefined} />}
           renderCell={renderCell}
         />
         <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} totalItems={total} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(v) => { setPage(1); setPageSize(v); }} onPrev={() => setPage(Math.max(1, page - 1))} onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))} />
@@ -1012,7 +1014,8 @@ const emptyAdjustmentForm = () => ({
   items: [{ product_id: '', quantity: '1', type: 'manual' }],
 });
 
-const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError }) => {
+const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError, hasPermission }) => {
+  const canWrite = hasPermission('manage_stock');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -1148,7 +1151,7 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
           extraActions={<button type="button" className="master-button master-button-secondary" onClick={load} title="Refresh"><RefreshIcon className="button-icon" /><span>Refresh</span></button>}
         />
         <div className="procurement-actions">
-          <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Stock Adjustment</AppButton>
+          {canWrite ? <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>New Stock Adjustment</AppButton> : null}
         </div>
       </div>
 
@@ -1164,7 +1167,7 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
           menuOpenId={menuOpenId}
           onToggleMenu={setMenuOpenId}
           menuRef={menuRef}
-          emptyState={<EmptyState title="No stock adjustments yet" description="Record a discrepancy to get started." actionLabel="New Stock Adjustment" onAction={openCreate} />}
+          emptyState={<EmptyState title="No stock adjustments yet" description="Record a discrepancy to get started." actionLabel={canWrite ? 'New Stock Adjustment' : undefined} onAction={canWrite ? openCreate : undefined} />}
           renderCell={renderCell}
         />
         <Pagination page={page} totalPages={Math.max(1, Math.ceil(total / pageSize))} totalItems={total} pageSize={pageSize} pageSizeOptions={PAGE_SIZES} onPageSizeChange={(v) => { setPage(1); setPageSize(v); }} onPrev={() => setPage(Math.max(1, page - 1))} onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))} />
@@ -1285,7 +1288,8 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
 
 // ─────────────────────────── Stock Count ───────────────────────────
 
-const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageError }) => {
+const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageError, hasPermission }) => {
+  const canWrite = hasPermission('manage_stock');
   const [warehouseId, setWarehouseId] = useState('');
   const [stockRows, setStockRows] = useState([]);
   const [counts, setCounts] = useState({});
@@ -1527,9 +1531,13 @@ const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageErr
               </tbody>
             </table>
           )}
-          <button type="button" className="master-button master-button-primary" onClick={submit} disabled={saving || stockRows.length === 0} style={{ marginTop: '16px' }}>
-            {saving ? 'Submitting...' : 'Submit Stock Count'}
-          </button>
+          {canWrite ? (
+            <button type="button" className="master-button master-button-primary" onClick={submit} disabled={saving || stockRows.length === 0} style={{ marginTop: '16px' }}>
+              {saving ? 'Submitting...' : 'Submit Stock Count'}
+            </button>
+          ) : (
+            <div className="status-banner status-banner-error" style={{ marginTop: '16px' }}>You don't have permission to submit stock counts.</div>
+          )}
         </div>
       ) : null}
     </div>

@@ -186,6 +186,8 @@ class ReportController {
   getStockMovement = async (req, res) => {
     try {
       let { page = 1, limit = 20, product_id, warehouse_id, transaction_type, from, to, sortBy = 'created_at', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 20);
       const offset = (page - 1) * limit;
       const safeSortBy = ALLOWED_MOVEMENT_SORT.includes(sortBy) ? sortBy : 'created_at';
       const safeOrder = String(order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';

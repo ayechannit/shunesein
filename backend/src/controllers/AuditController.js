@@ -11,6 +11,8 @@ class AuditController {
   getAll = async (req, res) => {
     try {
       let { page = 1, limit = 20, search = '', sortBy = 'timestamp', order = 'DESC', user_id, target_table, action, from, to } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 20);
       const offset = (page - 1) * limit;
       const safeSortBy = ALLOWED_SORT.includes(sortBy) ? sortBy : 'timestamp';
       const safeOrder = String(order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';

@@ -70,7 +70,7 @@ class FinanceController {
               ],
         });
 
-        await logAction(req.user.id, 'CREATE', 'income_expense_entries', entryRecord.id, null, entryRecord);
+        await logAction(req.user.id, 'CREATE', 'income_expense_entries', entryRecord.id, null, entryRecord, client);
         return entryRecord;
       });
 
@@ -86,6 +86,8 @@ class FinanceController {
   getAllEntries = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'date', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE e.description ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -137,7 +139,7 @@ class FinanceController {
         await reverseJournalEntries(client, { referenceType: 'income_expense_entry', referenceId: id, description: 'Deleted income/expense entry', createdBy: req.user.id });
 
         await client.query('DELETE FROM income_expense_entries WHERE id = $1', [id]);
-        await logAction(req.user.id, 'DELETE', 'income_expense_entries', id, entry, null);
+        await logAction(req.user.id, 'DELETE', 'income_expense_entries', id, entry, null, client);
       });
 
       res.json({ message: 'Entry deleted successfully' });

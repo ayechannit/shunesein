@@ -1,6 +1,7 @@
 const db = require('../config/db');
 const logAction = require('../utils/auditLogger');
 const recordStockTransaction = require('../utils/stockLogger');
+const { postInventoryVarianceEntry } = require('../utils/journalPoster');
 
 class StockCountController {
   // Reconciles physical counts against system stock. Creates one adjustment
@@ -30,6 +31,8 @@ class StockCountController {
         const adjustmentRecord = adjResult.rows[0];
 
         let itemsRecorded = 0;
+        let gainValue = 0;
+        let lossValue = 0;
 
         for (const item of counts) {
           const stockResult = await client.query(
@@ -55,9 +58,28 @@ class StockCountController {
 
           await recordStockTransaction(client, item.product_id, warehouse_id, delta, 'stock_count', adjustmentRecord.id);
           itemsRecorded += 1;
+
+          const productResult = await client.query('SELECT cost_price FROM products WHERE id = $1', [item.product_id]);
+          const value = Math.abs(delta) * Number(productResult.rows[0]?.cost_price || 0);
+          if (delta > 0) gainValue += value; else lossValue += value;
         }
 
-        await logAction(req.user.id, 'CREATE', 'stock_adjustments', adjustmentRecord.id, null, adjustmentRecord);
+        // General Ledger: same treatment as InventoryController.createAdjustment,
+        // since this reconciliation writes directly to stock_adjustments/items
+        // rather than going through that controller.
+        if (itemsRecorded > 0) {
+          await postInventoryVarianceEntry(client, {
+            date: adjustmentRecord.date,
+            referenceType: 'stock_adjustment',
+            referenceId: adjustmentRecord.id,
+            description: `Stock Count ${adjustmentRecord.adjustment_number}`,
+            createdBy: req.user.id,
+            valueIn: gainValue,
+            valueOut: lossValue,
+          });
+        }
+
+        await logAction(req.user.id, 'CREATE', 'stock_adjustments', adjustmentRecord.id, null, adjustmentRecord, client);
         return { adjustmentRecord, itemsRecorded };
       });
 

@@ -9,6 +9,8 @@ class PurchaseController {
   getAllOrders = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE po_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -87,40 +89,40 @@ class PurchaseController {
         return res.status(400).json({ error: 'Only pending orders can be edited' });
       }
 
-      await db.query('BEGIN');
+      const po = await db.withTransaction(async (client) => {
+        // Calculate total amount
+        let total_amount = 0;
+        for (const item of items) {
+          total_amount += item.quantity * item.unit_price;
+        }
 
-      // Calculate total amount
-      let total_amount = 0;
-      for (const item of items) {
-        total_amount += item.quantity * item.unit_price;
-      }
+        // Update PO header
+        const updateQuery = `
+          UPDATE purchase_orders
+          SET supplier_id = $1, order_date = $2, total_amount = $3, remark = $4, expected_date = $6
+          WHERE id = $5
+          RETURNING *
+        `;
+        const updateResult = await client.query(updateQuery, [supplier_id, order_date, total_amount, remark, id, expected_date]);
+        const po = updateResult.rows[0];
 
-      // Update PO header
-      const updateQuery = `
-        UPDATE purchase_orders
-        SET supplier_id = $1, order_date = $2, total_amount = $3, remark = $4, expected_date = $6
-        WHERE id = $5
-        RETURNING *
-      `;
-      const updateResult = await db.query(updateQuery, [supplier_id, order_date, total_amount, remark, id, expected_date]);
-      const po = updateResult.rows[0];
+        // Delete old items and insert new
+        await client.query('DELETE FROM purchase_order_items WHERE po_id = $1', [id]);
+        const itemQuery = `
+          INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_price)
+          VALUES ($1, $2, $3, $4)
+        `;
+        for (const item of items) {
+          await client.query(itemQuery, [id, item.product_id, item.quantity, item.unit_price]);
+        }
 
-      // Delete old items and insert new
-      await db.query('DELETE FROM purchase_order_items WHERE po_id = $1', [id]);
-      const itemQuery = `
-        INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_price)
-        VALUES ($1, $2, $3, $4)
-      `;
-      for (const item of items) {
-        await db.query(itemQuery, [id, item.product_id, item.quantity, item.unit_price]);
-      }
+        await logAction(req.user.id, 'UPDATE', 'purchase_orders', id, existing.rows[0], po, client);
 
-      await logAction(req.user.id, 'UPDATE', 'purchase_orders', id, existing.rows[0], po);
+        return po;
+      });
 
-      await db.query('COMMIT');
       res.json({ message: 'Purchase order updated successfully', data: po });
     } catch (error) {
-      await db.query('ROLLBACK');
       res.status(500).json({ error: error.message });
     }
   };
@@ -185,6 +187,8 @@ class PurchaseController {
   getAllVouchers = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE voucher_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -250,6 +254,12 @@ class PurchaseController {
   };
 
   // Update Purchase Voucher
+  // Only allowed while unpaid - once a payment exists the voucher's net_amount
+  // must stay put, since a payment was recorded against a specific figure
+  // (same rule as SalesController.updateInvoice). Editing items must also
+  // reconcile stock_levels and the supplier's outstanding_balance, not just
+  // the GL entry - previously this only reversed/reposted the journal entry
+  // and left stock and the supplier balance stuck at the pre-edit quantities.
   updateVoucher = async (req, res) => {
     try {
       const { id } = req.params;
@@ -261,59 +271,124 @@ class PurchaseController {
       if (existing.rows.length === 0) {
         return res.status(404).json({ error: 'Purchase voucher not found' });
       }
-
-      await db.query('BEGIN');
-
-      let total_amount = 0;
-      for (const item of items) {
-        total_amount += item.quantity * item.unit_price;
+      if (existing.rows[0].payment_status !== 'unpaid') {
+        return res.status(400).json({ error: 'Only unpaid vouchers can be edited' });
+      }
+      if (existing.rows[0].warehouse_id !== warehouse_id) {
+        return res.status(400).json({ error: 'Changing the warehouse on an existing voucher is not supported - delete and recreate it instead' });
       }
 
-      const updateQuery = `
-        UPDATE purchase_vouchers
-        SET supplier_id = $1, warehouse_id = $2, voucher_date = $3, total_amount = $4,
-            discount_amount = $5, tax_amount = $6, remark = $7, received_date = $9, quality_rating = $10
-        WHERE id = $8
-        RETURNING *
-      `;
-      const updateResult = await db.query(updateQuery, [
-        supplier_id, warehouse_id, voucher_date, total_amount,
-        discount_amount || 0, tax_amount || 0, remark, id, received_date, quality_rating
-      ]);
-      const voucher = updateResult.rows[0];
+      const voucher = await db.withTransaction(async (client) => {
+        const oldItemsResult = await client.query('SELECT product_id, quantity FROM purchase_items WHERE voucher_id = $1', [id]);
 
-      // Delete old items and insert new
-      await db.query('DELETE FROM purchase_items WHERE voucher_id = $1', [id]);
-      const itemQuery = `
-        INSERT INTO purchase_items (voucher_id, product_id, quantity, unit_price, lot_number, expiry_date)
-        VALUES ($1, $2, $3, $4, $5, $6)
-      `;
-      for (const item of items) {
-        await db.query(itemQuery, [id, item.product_id, item.quantity, item.unit_price, item.lot_number || null, item.expiry_date || null]);
-      }
+        // Reversing receipt of the old line items must not push stock negative -
+        // that would mean the goods already moved on (sold, transferred, or
+        // adjusted) and this voucher can no longer be safely edited (same
+        // guard as PurchaseController.deleteVoucher).
+        for (const item of oldItemsResult.rows) {
+          const stockResult = await client.query(
+            'SELECT quantity FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2 FOR UPDATE',
+            [warehouse_id, item.product_id]
+          );
+          const currentQty = Number(stockResult.rows[0]?.quantity || 0);
+          if (currentQty < Number(item.quantity)) {
+            throw new HttpError(400, `Cannot edit: stock received for product ID ${item.product_id} on this voucher has already moved (sold, transferred, or adjusted). Reverse those movements before editing.`);
+          }
+        }
+        for (const item of oldItemsResult.rows) {
+          await client.query(
+            'UPDATE stock_levels SET quantity = quantity - $1 WHERE warehouse_id = $2 AND product_id = $3',
+            [item.quantity, warehouse_id, item.product_id]
+          );
+          await recordStockTransaction(client, item.product_id, warehouse_id, -Number(item.quantity), 'purchase_edit_reversal', id);
+        }
 
-      // General Ledger: reverse the entry for the old version of this
-      // voucher, then post a fresh one for the new totals - see
-      // SalesController.updateInvoice for the same convention.
-      await reverseJournalEntries(db, { referenceType: 'purchase_voucher', referenceId: id, date: voucher_date, description: 'Superseded by edit', createdBy: req.user.id });
-      await postJournalEntry(db, {
-        date: voucher.voucher_date,
-        referenceType: 'purchase_voucher',
-        referenceId: voucher.id,
-        description: `Purchase Voucher ${voucher.voucher_number} (edited)`,
-        createdBy: req.user.id,
-        lines: [
-          { code: ACCOUNT_CODES.INVENTORY, debit: voucher.net_amount },
-          { code: ACCOUNT_CODES.ACCOUNTS_PAYABLE, credit: voucher.net_amount },
-        ],
+        let total_amount = 0;
+        for (const item of items) {
+          total_amount += item.quantity * item.unit_price;
+        }
+
+        const updateQuery = `
+          UPDATE purchase_vouchers
+          SET supplier_id = $1, warehouse_id = $2, voucher_date = $3, total_amount = $4,
+              discount_amount = $5, tax_amount = $6, remark = $7, received_date = $9, quality_rating = $10
+          WHERE id = $8
+          RETURNING *
+        `;
+        const updateResult = await client.query(updateQuery, [
+          supplier_id, warehouse_id, voucher_date, total_amount,
+          discount_amount || 0, tax_amount || 0, remark, id, received_date, quality_rating
+        ]);
+        const voucher = updateResult.rows[0];
+
+        // Delete old items and insert new
+        await client.query('DELETE FROM purchase_items WHERE voucher_id = $1', [id]);
+        const itemQuery = `
+          INSERT INTO purchase_items (voucher_id, product_id, quantity, unit_price, lot_number, expiry_date)
+          VALUES ($1, $2, $3, $4, $5, $6)
+        `;
+        for (const item of items) {
+          await client.query(itemQuery, [id, item.product_id, item.quantity, item.unit_price, item.lot_number || null, item.expiry_date || null]);
+
+          await client.query(`
+            INSERT INTO stock_levels (warehouse_id, product_id, quantity)
+            VALUES ($1, $2, $3)
+            ON CONFLICT (warehouse_id, product_id)
+            DO UPDATE SET quantity = stock_levels.quantity + $3
+          `, [warehouse_id, item.product_id, item.quantity]);
+
+          await recordStockTransaction(client, item.product_id, warehouse_id, Number(item.quantity), 'purchase_edit', id);
+        }
+
+        // Reconcile supplier outstanding_balance the same way
+        // SalesController.updateInvoice reconciles the customer side: apply
+        // just the delta if the supplier didn't change, otherwise reverse the
+        // old amount off the old supplier and apply the full new amount to
+        // the new one.
+        const oldSupplierId = existing.rows[0].supplier_id;
+        const oldNetAmount = Number(existing.rows[0].net_amount);
+        const newNetAmount = Number(voucher.net_amount);
+
+        if (oldSupplierId && supplier_id && oldSupplierId === supplier_id) {
+          const balanceDelta = newNetAmount - oldNetAmount;
+          if (balanceDelta !== 0) {
+            await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2', [balanceDelta, supplier_id]);
+          }
+        } else {
+          if (oldSupplierId) {
+            await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [oldNetAmount, oldSupplierId]);
+          }
+          if (supplier_id) {
+            await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2', [newNetAmount, supplier_id]);
+          }
+        }
+
+        // General Ledger: reverse the entry for the old version of this
+        // voucher, then post a fresh one for the new totals - see
+        // SalesController.updateInvoice for the same convention.
+        await reverseJournalEntries(client, { referenceType: 'purchase_voucher', referenceId: id, date: voucher_date, description: 'Superseded by edit', createdBy: req.user.id });
+        await postJournalEntry(client, {
+          date: voucher.voucher_date,
+          referenceType: 'purchase_voucher',
+          referenceId: voucher.id,
+          description: `Purchase Voucher ${voucher.voucher_number} (edited)`,
+          createdBy: req.user.id,
+          lines: [
+            { code: ACCOUNT_CODES.INVENTORY, debit: voucher.net_amount },
+            { code: ACCOUNT_CODES.ACCOUNTS_PAYABLE, credit: voucher.net_amount },
+          ],
+        });
+
+        await logAction(req.user.id, 'UPDATE', 'purchase_vouchers', id, existing.rows[0], voucher, client);
+
+        return voucher;
       });
 
-      await logAction(req.user.id, 'UPDATE', 'purchase_vouchers', id, existing.rows[0], voucher);
-
-      await db.query('COMMIT');
       res.json({ message: 'Purchase voucher updated successfully', data: voucher });
     } catch (error) {
-      await db.query('ROLLBACK');
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
       res.status(500).json({ error: error.message });
     }
   };
@@ -378,7 +453,7 @@ class PurchaseController {
         await reverseJournalEntries(client, { referenceType: 'purchase_voucher', referenceId: id, description: `Deleted Purchase Voucher ${voucherRecord.voucher_number}`, createdBy: req.user.id });
 
         await client.query('DELETE FROM purchase_vouchers WHERE id = $1', [id]);
-        await logAction(req.user.id, 'DELETE', 'purchase_vouchers', id, voucherRecord, null);
+        await logAction(req.user.id, 'DELETE', 'purchase_vouchers', id, voucherRecord, null, client);
 
         return voucherRecord;
       });
@@ -399,38 +474,38 @@ class PurchaseController {
     const created_by = req.user.id;
 
     try {
-      await db.query('BEGIN');
+      const po = await db.withTransaction(async (client) => {
+        // 1. Calculate total amount
+        let total_amount = 0;
+        for (const item of items) {
+          total_amount += item.quantity * item.unit_price;
+        }
 
-      // 1. Calculate total amount
-      let total_amount = 0;
-      for (const item of items) {
-        total_amount += item.quantity * item.unit_price;
-      }
+        // 2. Insert PO
+        const poQuery = `
+          INSERT INTO purchase_orders (po_number, supplier_id, order_date, total_amount, remark, created_by, expected_date)
+          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          RETURNING *
+        `;
+        const poResult = await client.query(poQuery, [po_number, supplier_id, order_date, total_amount, remark, created_by, expected_date]);
+        const po = poResult.rows[0];
 
-      // 2. Insert PO
-      const poQuery = `
-        INSERT INTO purchase_orders (po_number, supplier_id, order_date, total_amount, remark, created_by, expected_date)
-        VALUES ($1, $2, $3, $4, $5, $6, $7)
-        RETURNING *
-      `;
-      const poResult = await db.query(poQuery, [po_number, supplier_id, order_date, total_amount, remark, created_by, expected_date]);
-      const po = poResult.rows[0];
+        // 3. Insert Items
+        const itemQuery = `
+          INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_price)
+          VALUES ($1, $2, $3, $4)
+        `;
+        for (const item of items) {
+          await client.query(itemQuery, [po.id, item.product_id, item.quantity, item.unit_price]);
+        }
 
-      // 3. Insert Items
-      const itemQuery = `
-        INSERT INTO purchase_order_items (po_id, product_id, quantity, unit_price)
-        VALUES ($1, $2, $3, $4)
-      `;
-      for (const item of items) {
-        await db.query(itemQuery, [po.id, item.product_id, item.quantity, item.unit_price]);
-      }
-      
-      await logAction(req.user.id, 'CREATE', 'purchase_orders', po.id, null, po);
+        await logAction(req.user.id, 'CREATE', 'purchase_orders', po.id, null, po, client);
 
-      await db.query('COMMIT');
+        return po;
+      });
+
       res.status(201).json({ id: po.id, message: 'Purchase Order created successfully' });
     } catch (error) {
-      await db.query('ROLLBACK');
       res.status(500).json({ error: error.message });
     }
   };
@@ -513,7 +588,7 @@ class PurchaseController {
           ],
         });
 
-        await logAction(req.user.id, 'CREATE', 'purchase_vouchers', voucher.id, null, voucher);
+        await logAction(req.user.id, 'CREATE', 'purchase_vouchers', voucher.id, null, voucher, client);
 
         return voucher;
       });
@@ -559,6 +634,8 @@ class PurchaseController {
   getAllReturns = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'DESC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
       let whereClause = search ? 'WHERE pr.return_number ILIKE $1' : '';
       let params = search ? [`%${search}%`] : [];
@@ -678,7 +755,7 @@ class PurchaseController {
           ],
         });
 
-        await logAction(req.user.id, 'CREATE', 'purchase_returns', returnRecord.id, null, returnRecord);
+        await logAction(req.user.id, 'CREATE', 'purchase_returns', returnRecord.id, null, returnRecord, client);
         return returnRecord;
       });
 
@@ -720,7 +797,7 @@ class PurchaseController {
         await reverseJournalEntries(client, { referenceType: 'purchase_return', referenceId: id, description: `Deleted Purchase Return ${returnRecord.return_number}`, createdBy: req.user.id });
 
         await client.query('DELETE FROM purchase_returns WHERE id = $1', [id]);
-        await logAction(req.user.id, 'DELETE', 'purchase_returns', id, returnRecord, null);
+        await logAction(req.user.id, 'DELETE', 'purchase_returns', id, returnRecord, null, client);
         return returnRecord;
       });
       res.json({ message: 'Purchase return deleted successfully', data: ret });

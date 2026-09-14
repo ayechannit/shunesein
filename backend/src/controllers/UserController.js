@@ -73,6 +73,8 @@ class UserController extends MasterDataController {
   getAll = async (req, res) => {
     try {
       let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'ASC' } = req.query;
+      page = Math.max(1, parseInt(page, 10) || 1);
+      limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
 
       // sortBy/order come straight from query params - never interpolate them
