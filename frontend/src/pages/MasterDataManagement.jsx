@@ -298,7 +298,8 @@ function iconForModule(moduleKey) {
       return 'grid';
     case 'products':
       return 'package';
-    case 'pricing-tiers':
+    case 'price-levels':
+    case 'price-level-pricing':
       return 'tag';
     case 'suppliers':
       return 'truck';
@@ -484,27 +485,19 @@ const MasterDataManagement = ({ token, onLogout }) => {
   const [pricingDialog, setPricingDialog] = useState({
     open: false,
     record: null,
-    values: { cost_price: '', markup_type: 'fixed', markup_value: '' },
-    saving: false,
-    error: '',
-  });
-  const [tiersDialog, setTiersDialog] = useState({
-    open: false,
-    record: null,
-    tiers: [],
+    rows: [],
     loading: false,
     saving: false,
     error: '',
   });
-  const [selectedRowIds, setSelectedRowIds] = useState(() => new Set());
-  const [bulkPricingDialog, setBulkPricingDialog] = useState({
+  const [priceLevelsDialog, setPriceLevelsDialog] = useState({
     open: false,
-    rows: [],
-    applyMarkupType: 'fixed',
-    applyMarkupValue: '',
+    role: null,
+    selectedIds: [],
+    loading: false,
     saving: false,
-    error: '',
   });
+  const [priceLevelOptions, setPriceLevelOptions] = useState([]);
   const fileInputRef = useRef(null);
   const menuRef = useRef(null);
   // Falls back to the default module if activeModuleKey ever points at a key
@@ -552,6 +545,18 @@ const MasterDataManagement = ({ token, onLogout }) => {
     );
     const nextValues = response.data || [];
     setLookupCache((previous) => ({ ...previous, allPermissions: nextValues }));
+    return nextValues;
+  };
+
+  const loadPriceLevelOptions = async () => {
+    if (lookupCache.allPriceLevels) return lookupCache.allPriceLevels;
+
+    const response = await buildRequest(
+      `${API_ROOT}/master/price-levels?page=1&limit=1000&search=&sortBy=name&order=ASC`,
+      token,
+    );
+    const nextValues = response.data || [];
+    setLookupCache((previous) => ({ ...previous, allPriceLevels: nextValues }));
     return nextValues;
   };
 
@@ -656,21 +661,6 @@ const MasterDataManagement = ({ token, onLogout }) => {
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeModuleKey]);
-
-  // A selection made in one module shouldn't linger when switching to another.
-  useEffect(() => {
-    setSelectedRowIds(new Set());
-  }, [activeModuleKey]);
-
-  // Auto-dismiss success confirmations after a few seconds; errors stay until the user acts.
-  useEffect(() => {
-    if (!activeState.success) return;
-    const moduleKeyAtSchedule = activeModuleKey;
-    const timer = setTimeout(() => {
-      updateModuleState(moduleKeyAtSchedule, { success: '' });
-    }, 3000);
-    return () => clearTimeout(timer);
-  }, [activeState.success, activeModuleKey]);
 
   const lookupMaps = useMemo(() => {
     const next = {};
@@ -981,6 +971,52 @@ const MasterDataManagement = ({ token, onLogout }) => {
     }
   };
 
+  const openPriceLevelsDialog = async (roleRecord) => {
+    setPriceLevelsDialog({ open: true, role: roleRecord, selectedIds: [], loading: true, saving: false });
+
+    try {
+      const [allLevels, roleLevels] = await Promise.all([
+        loadPriceLevelOptions(),
+        buildRequest(`${API_ROOT}/user-management/roles/${roleRecord.id}/price-levels`, token),
+      ]);
+
+      const selectedIds = Array.isArray(roleLevels) ? roleLevels.map((item) => item.id) : [];
+      setPriceLevelOptions(allLevels);
+      setPriceLevelsDialog({ open: true, role: roleRecord, selectedIds, loading: false, saving: false });
+    } catch (error) {
+      if (error.status === 401) {
+        onLogout();
+        return;
+      }
+      setPriceLevelsDialog({ open: false, role: null, selectedIds: [], loading: false, saving: false });
+      updateActiveState({ error: error.message });
+    }
+  };
+
+  const saveRolePriceLevels = async () => {
+    if (!priceLevelsDialog.role) return;
+
+    setPriceLevelsDialog((previous) => ({ ...previous, saving: true }));
+
+    try {
+      await buildRequest(`${API_ROOT}/user-management/roles/${priceLevelsDialog.role.id}/price-levels`, token, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ priceLevelIds: priceLevelsDialog.selectedIds }),
+      });
+
+      setPriceLevelsDialog({ open: false, role: null, selectedIds: [], loading: false, saving: false });
+      updateActiveState({ success: 'Role price levels updated.' });
+    } catch (error) {
+      if (error.status === 401) {
+        onLogout();
+        return;
+      }
+      setPriceLevelsDialog((previous) => ({ ...previous, saving: false }));
+      updateActiveState({ error: error.message });
+    }
+  };
+
   // Fetch the logged-in user's own current profile (timezone included) once
   // on mount - the JWT payload doesn't carry it and wouldn't reflect a later
   // change until the next login anyway.
@@ -1079,24 +1115,51 @@ const MasterDataManagement = ({ token, onLogout }) => {
     setTzSuggestion('');
   };
 
-  const openPricingDialog = (record) => {
-    setPricingDialog({
-      open: true,
-      record,
-      values: {
-        cost_price: record.cost_price ?? '',
-        markup_type: record.markup_type || 'fixed',
-        markup_value: record.markup_value ?? '',
-      },
-      saving: false,
-      error: '',
-    });
+  // "Set Price" is one combined dialog: cost/markup (which derives the flat
+  // selling price) plus this product's price at each price level. Always
+  // re-fetches the authoritative product record rather than trusting
+  // whatever fields the triggering row happened to carry, since this dialog
+  // is opened both from the Products list (full record) and from the
+  // consolidated Price Level Pricing overview (only level-price fields).
+  // "Set Price" is one unified table: a synthetic "Default" row (the
+  // product's own base cost/markup, used whenever no price level applies)
+  // followed by one row per price level, all sharing the same Cost Price /
+  // Markup Type / Markup Value / Selling Price shape. Always re-fetches the
+  // authoritative product record rather than trusting whatever fields the
+  // triggering row happened to carry, since this dialog is opened both from
+  // the Products list (full record) and from the consolidated Price Level
+  // Pricing overview (only level-price fields).
+  const openPricingDialog = async (record) => {
+    setPricingDialog({ open: true, record, rows: [], loading: true, saving: false, error: '' });
+
+    try {
+      const [product, levelPrices] = await Promise.all([
+        buildRequest(`${MASTER_DATA_MODULES.products.apiBase}/${record.id}`, token),
+        buildRequest(`${API_ROOT}/pricing/products/${record.id}/level-prices`, token),
+      ]);
+
+      const rows = (levelPrices.data || []).map((row) => ({
+        price_level_id: row.price_level_id,
+        price_level_name: row.price_level_name,
+        cost_price: row.cost_price === null || row.cost_price === undefined ? '' : String(row.cost_price),
+        markup_type: row.markup_type || 'fixed',
+        markup_value: row.markup_value === null || row.markup_value === undefined ? '' : String(row.markup_value),
+      }));
+
+      setPricingDialog({ open: true, record: product, rows, loading: false, saving: false, error: '' });
+    } catch (error) {
+      if (error.status === 401) {
+        onLogout();
+        return;
+      }
+      setPricingDialog((previous) => ({ ...previous, loading: false, error: error.message || 'Unable to load pricing.' }));
+    }
   };
 
-  const handlePricingFieldChange = (key, value) => {
+  const updatePricingRow = (index, key, value) => {
     setPricingDialog((previous) => ({
       ...previous,
-      values: { ...previous.values, [key]: value },
+      rows: previous.rows.map((row, rowIndex) => (rowIndex === index ? { ...row, [key]: value } : row)),
     }));
   };
 
@@ -1105,17 +1168,20 @@ const MasterDataManagement = ({ token, onLogout }) => {
     setPricingDialog((previous) => ({ ...previous, saving: true, error: '' }));
 
     try {
-      await buildRequest(`${activeModule.apiBase}/${pricingDialog.record.id}`, token, {
+      await buildRequest(`${API_ROOT}/pricing/products/${pricingDialog.record.id}/level-prices`, token, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          cost_price: pricingDialog.values.cost_price === '' ? null : Number(pricingDialog.values.cost_price),
-          markup_type: pricingDialog.values.markup_type,
-          markup_value: pricingDialog.values.markup_value === '' ? null : Number(pricingDialog.values.markup_value),
+          prices: pricingDialog.rows.map((row) => ({
+            price_level_id: row.price_level_id,
+            cost_price: row.cost_price === '' ? null : Number(row.cost_price),
+            markup_type: row.markup_type,
+            markup_value: row.markup_value === '' ? null : Number(row.markup_value),
+          })),
         }),
       });
 
-      setPricingDialog({ open: false, record: null, values: { cost_price: '', markup_type: 'fixed', markup_value: '' }, saving: false, error: '' });
+      closePricingDialog();
       updateActiveState({ success: 'Price updated.' });
       await loadModuleData(activeModuleKey, { ...activeState, loading: true });
     } catch (error) {
@@ -1128,167 +1194,7 @@ const MasterDataManagement = ({ token, onLogout }) => {
   };
 
   const closePricingDialog = () => {
-    setPricingDialog({ open: false, record: null, values: { cost_price: '', markup_type: 'fixed', markup_value: '' }, saving: false, error: '' });
-  };
-
-  // Quantity-tier pricing: pick a product, define quantity ranges and the
-  // price for each range - no price list to create first (see PricingController).
-  const openTiersDialog = async (record) => {
-    setTiersDialog({ open: true, record, tiers: [], loading: true, saving: false, error: '' });
-    try {
-      const response = await buildRequest(`${API_ROOT}/pricing/products/${record.id}/tiers`, token);
-      const tiers = (response.data || []).map((tier) => ({ min_quantity: String(tier.min_quantity), unit_price: String(tier.unit_price) }));
-      setTiersDialog({ open: true, record, tiers, loading: false, saving: false, error: '' });
-    } catch (error) {
-      if (error.status === 401) {
-        onLogout();
-        return;
-      }
-      setTiersDialog((previous) => ({ ...previous, loading: false, error: error.message || 'Unable to load pricing tiers.' }));
-    }
-  };
-
-  const closeTiersDialog = () => {
-    setTiersDialog({ open: false, record: null, tiers: [], loading: false, saving: false, error: '' });
-  };
-
-  const addTierRow = () => {
-    setTiersDialog((previous) => ({ ...previous, tiers: [...previous.tiers, { min_quantity: '', unit_price: '' }] }));
-  };
-
-  const updateTierRow = (index, key, value) => {
-    setTiersDialog((previous) => ({
-      ...previous,
-      tiers: previous.tiers.map((tier, tierIndex) => (tierIndex === index ? { ...tier, [key]: value } : tier)),
-    }));
-  };
-
-  const removeTierRow = (index) => {
-    setTiersDialog((previous) => ({ ...previous, tiers: previous.tiers.filter((_, tierIndex) => tierIndex !== index) }));
-  };
-
-  const saveTiers = async () => {
-    if (!tiersDialog.record) return;
-    setTiersDialog((previous) => ({ ...previous, saving: true, error: '' }));
-    try {
-      await buildRequest(`${API_ROOT}/pricing/products/${tiersDialog.record.id}/tiers`, token, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          tiers: tiersDialog.tiers.map((tier) => ({ min_quantity: Number(tier.min_quantity), unit_price: Number(tier.unit_price) })),
-        }),
-      });
-      closeTiersDialog();
-      updateActiveState({ success: 'Pricing tiers saved.' });
-      await loadModuleData(activeModuleKey, { ...activeState, loading: true });
-    } catch (error) {
-      if (error.status === 401) {
-        onLogout();
-        return;
-      }
-      setTiersDialog((previous) => ({ ...previous, saving: false, error: error.message || 'Unable to save pricing tiers.' }));
-    }
-  };
-
-  const toggleRowSelection = (id) => {
-    setSelectedRowIds((previous) => {
-      const next = new Set(previous);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      return next;
-    });
-  };
-
-  const toggleSelectAllRows = (rowsOnPage, checked) => {
-    setSelectedRowIds((previous) => {
-      const next = new Set(previous);
-      rowsOnPage.forEach((row) => {
-        if (checked) next.add(row.id);
-        else next.delete(row.id);
-      });
-      return next;
-    });
-  };
-
-  // Bulk pricing: set cost/markup for every selected product in one dialog,
-  // with an optional "apply the same markup to all" convenience, since costs
-  // usually differ per product but markup % is often uniform across a batch.
-  const openBulkPricingDialog = () => {
-    const selectedRecords = visibleRecords.filter((record) => selectedRowIds.has(record.id));
-    setBulkPricingDialog({
-      open: true,
-      rows: selectedRecords.map((record) => ({
-        id: record.id,
-        name: record.name,
-        cost_price: record.cost_price ?? '',
-        markup_type: record.markup_type || 'fixed',
-        markup_value: record.markup_value ?? '',
-      })),
-      applyMarkupType: 'fixed',
-      applyMarkupValue: '',
-      saving: false,
-      error: '',
-    });
-  };
-
-  const closeBulkPricingDialog = () => {
-    setBulkPricingDialog({ open: false, rows: [], applyMarkupType: 'fixed', applyMarkupValue: '', saving: false, error: '' });
-  };
-
-  const updateBulkPricingRow = (id, key, value) => {
-    setBulkPricingDialog((previous) => ({
-      ...previous,
-      rows: previous.rows.map((row) => (row.id === id ? { ...row, [key]: value } : row)),
-    }));
-  };
-
-  const applyMarkupToAllRows = () => {
-    setBulkPricingDialog((previous) => ({
-      ...previous,
-      rows: previous.rows.map((row) => ({
-        ...row,
-        markup_type: previous.applyMarkupType,
-        markup_value: previous.applyMarkupValue,
-      })),
-    }));
-  };
-
-  const saveBulkPricing = async () => {
-    setBulkPricingDialog((previous) => ({ ...previous, saving: true, error: '' }));
-
-    let successCount = 0;
-    const failures = [];
-
-    for (const row of bulkPricingDialog.rows) {
-      try {
-        await buildRequest(`${MASTER_DATA_MODULES.products.apiBase}/${row.id}`, token, {
-          method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            cost_price: row.cost_price === '' ? null : Number(row.cost_price),
-            markup_type: row.markup_type,
-            markup_value: row.markup_value === '' ? null : Number(row.markup_value),
-          }),
-        });
-        successCount += 1;
-      } catch (error) {
-        if (error.status === 401) {
-          onLogout();
-          return;
-        }
-        failures.push(`${row.name}: ${error.message || 'failed'}`);
-      }
-    }
-
-    if (failures.length > 0) {
-      setBulkPricingDialog((previous) => ({ ...previous, saving: false, error: `${successCount} updated, ${failures.length} failed - ${failures.join('; ')}` }));
-    } else {
-      closeBulkPricingDialog();
-      setSelectedRowIds(new Set());
-      updateActiveState({ success: `Updated pricing for ${successCount} product${successCount === 1 ? '' : 's'}.` });
-    }
-
-    await loadModuleData(activeModuleKey, { ...activeState, loading: true });
+    setPricingDialog({ open: false, record: null, rows: [], loading: false, saving: false, error: '' });
   };
 
   const handleSetDefaultPrintPageSetup = async (record) => {
@@ -1309,14 +1215,13 @@ const MasterDataManagement = ({ token, onLogout }) => {
     if (action === 'assign-permissions') {
       openPermissionsDialog(record);
     }
-    if (action === 'set-price') {
-      openPricingDialog(record);
-    }
-    if (action === 'quantity-pricing') {
+    if (action === 'set-price' || action === 'price-level-pricing') {
       // The Products list passes the product itself (id/name are the
-      // product's own); the consolidated Quantity Pricing overview passes a
-      // tier row instead, which carries the product under product_id/product_name.
-      openTiersDialog({ id: record.product_id || record.id, name: record.product_name || record.name });
+      // product's own); the consolidated Price Level Pricing overview passes
+      // a level-price row instead, which carries the product under product_id/product_name.
+      // Either way, openPricingDialog re-fetches the authoritative product
+      // record itself, so only the id needs to be right here.
+      openPricingDialog({ id: record.product_id || record.id, name: record.product_name || record.name });
     }
     if (action === 'set-default') {
       handleSetDefaultPrintPageSetup(record);
@@ -1339,6 +1244,10 @@ const MasterDataManagement = ({ token, onLogout }) => {
             <ShieldIcon className="menu-icon" />
             <span>Permissions</span>
           </button>
+          <button type="button" className="dropdown-menu-item" onClick={() => { openPriceLevelsDialog(row); updateActiveState({ menuOpenId: null }); }}>
+            <AppIcon name="tag" className="menu-icon" />
+            <span>Price Levels</span>
+          </button>
           <button type="button" className="dropdown-menu-item danger" onClick={() => { askDelete(row); updateActiveState({ menuOpenId: null }); }}>
             <TrashIcon className="menu-icon" />
             <span>Delete</span>
@@ -1348,8 +1257,12 @@ const MasterDataManagement = ({ token, onLogout }) => {
     }
     return (
       <div className="dropdown-menu-list">
+        <button type="button" className="dropdown-menu-item" onClick={() => { openPriceLevelsDialog(row); updateActiveState({ menuOpenId: null }); }}>
+          <AppIcon name="tag" className="menu-icon" />
+          <span>Price Levels</span>
+        </button>
         <span className="dropdown-menu-item" style={{ color: 'var(--md-muted)', cursor: 'default' }}>
-          Owner role is protected
+          Owner role is otherwise protected
         </span>
       </div>
     );
@@ -1414,11 +1327,6 @@ const MasterDataManagement = ({ token, onLogout }) => {
 
   const pageActions = (
     <>
-      {activeModule.bulkPricing && selectedRowIds.size > 0 ? (
-        <AppButton variant="primary" iconLeft={<WalletIcon className="button-icon" />} onClick={openBulkPricingDialog}>
-          Set Price ({selectedRowIds.size})
-        </AppButton>
-      ) : null}
       {!activeModule.readOnly && canWriteActiveModule ? (
         <>
           <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>
@@ -1567,7 +1475,14 @@ const MasterDataManagement = ({ token, onLogout }) => {
             <KpiCards items={stats} />
 
             {activeState.error ? <div className="status-banner status-banner-error">{activeState.error}</div> : null}
-            {activeState.success ? <div className="status-banner status-banner-success status-banner-autodismiss">{activeState.success}</div> : null}
+            {activeState.success ? (
+              <div className="status-banner status-banner-success">
+                <span>{activeState.success}</span>
+                <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => updateActiveState({ success: '' })}>
+                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                </button>
+              </div>
+            ) : null}
 
             <section className="table-section">
               <div className="table-headline">
@@ -1595,10 +1510,6 @@ const MasterDataManagement = ({ token, onLogout }) => {
                 menuOpenId={activeState.menuOpenId}
                 onToggleMenu={(menuOpenId) => updateActiveState({ menuOpenId })}
                 menuRef={menuRef}
-                selectable={Boolean(activeModule.bulkPricing)}
-                selectedIds={selectedRowIds}
-                onToggleRow={toggleRowSelection}
-                onToggleAll={toggleSelectAllRows}
                 emptyState={
                   <EmptyState
                     title={activeModule.emptyState.title}
@@ -1799,6 +1710,62 @@ const MasterDataManagement = ({ token, onLogout }) => {
         </MasterModal>
       ) : null}
 
+      {priceLevelsDialog.open ? (
+        <MasterModal
+          title="Role Price Levels"
+          description={priceLevelsDialog.role ? `Choose which price levels ${priceLevelsDialog.role.name} can use in Sales.` : 'Select price levels for the role.'}
+          onClose={() => setPriceLevelsDialog({ open: false, role: null, selectedIds: [], loading: false, saving: false })}
+          footer={
+            <>
+              <button
+                type="button"
+                className="master-button master-button-secondary"
+                onClick={() => setPriceLevelsDialog({ open: false, role: null, selectedIds: [], loading: false, saving: false })}
+              >
+                Cancel
+              </button>
+              <button type="button" className="master-button master-button-primary" onClick={saveRolePriceLevels} disabled={priceLevelsDialog.saving || priceLevelsDialog.loading}>
+                {priceLevelsDialog.saving ? 'Saving...' : 'Save Price Levels'}
+              </button>
+            </>
+          }
+        >
+          <div className="permission-picker">
+            {priceLevelsDialog.loading ? (
+              <div className="permission-loading">Loading price levels...</div>
+            ) : priceLevelOptions.length === 0 ? (
+              <p className="field-hint">No price levels exist yet - create one under Master Data &gt; Price Levels first.</p>
+            ) : (
+              <div className="permission-grid">
+                {priceLevelOptions.map((level) => {
+                  const checked = priceLevelsDialog.selectedIds.includes(level.id);
+                  return (
+                    <label key={level.id} className={`permission-item ${checked ? 'is-selected' : ''}`}>
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={(event) =>
+                          setPriceLevelsDialog((previous) => ({
+                            ...previous,
+                            selectedIds: event.target.checked
+                              ? [...previous.selectedIds, level.id]
+                              : previous.selectedIds.filter((id) => id !== level.id),
+                          }))
+                        }
+                      />
+                      <span className="permission-copy">
+                        <strong>{level.name}</strong>
+                        {level.description ? <small>{level.description}</small> : null}
+                      </span>
+                    </label>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </MasterModal>
+      ) : null}
+
       {profileDialog.open ? (
         <MasterModal
           title="My Profile"
@@ -1849,15 +1816,16 @@ const MasterDataManagement = ({ token, onLogout }) => {
 
       {pricingDialog.open ? (
         <MasterModal
+          size="full"
           title="Set Price"
-          description={pricingDialog.record ? `Update cost and markup for ${pricingDialog.record.name}.` : 'Update cost and markup.'}
+          description={pricingDialog.record ? `Cost, markup and selling price for ${pricingDialog.record.name}, per price level.` : 'Cost, markup and selling price for every price level.'}
           onClose={closePricingDialog}
           footer={
             <>
               <button type="button" className="master-button master-button-secondary" onClick={closePricingDialog}>
                 Cancel
               </button>
-              <button type="button" className="master-button master-button-primary" onClick={savePricing} disabled={pricingDialog.saving}>
+              <button type="button" className="master-button master-button-primary" onClick={savePricing} disabled={pricingDialog.saving || pricingDialog.loading}>
                 {pricingDialog.saving ? 'Saving...' : 'Save Price'}
               </button>
             </>
@@ -1865,131 +1833,15 @@ const MasterDataManagement = ({ token, onLogout }) => {
         >
           <div className="modal-form">
             {pricingDialog.error ? <div className="status-banner status-banner-error">{pricingDialog.error}</div> : null}
-            <div className="form-grid">
-              {(MASTER_DATA_MODULES.products.pricingFields || []).map((field) => (
-                <FormField
-                  key={field.key}
-                  field={field}
-                  value={pricingDialog.values[field.key]}
-                  onChange={handlePricingFieldChange}
-                />
-              ))}
-              <div className="form-field">
-                <label>Selling Price (calculated)</label>
-                <input type="text" readOnly value={formatNumber(calculateSellingPriceFromValues(pricingDialog.values))} />
-              </div>
-            </div>
-          </div>
-        </MasterModal>
-      ) : null}
-
-      {tiersDialog.open ? (
-        <MasterModal
-          size="wide"
-          title="Quantity Pricing"
-          description={tiersDialog.record ? `Set the price for each quantity range of ${tiersDialog.record.name}.` : 'Set quantity-based pricing.'}
-          onClose={closeTiersDialog}
-          footer={
-            <>
-              <button type="button" className="master-button master-button-secondary" onClick={closeTiersDialog}>
-                Cancel
-              </button>
-              <button type="button" className="master-button master-button-primary" onClick={saveTiers} disabled={tiersDialog.saving || tiersDialog.loading}>
-                {tiersDialog.saving ? 'Saving...' : 'Save Pricing Tiers'}
-              </button>
-            </>
-          }
-        >
-          <div className="modal-form">
-            {tiersDialog.error ? <div className="status-banner status-banner-error">{tiersDialog.error}</div> : null}
-            {tiersDialog.loading ? (
-              <div>Loading pricing tiers...</div>
+            {pricingDialog.loading ? (
+              <div>Loading pricing...</div>
+            ) : pricingDialog.rows.length === 0 ? (
+              <p className="field-hint">No price levels exist yet - create one under Master Data &gt; Price Levels first.</p>
             ) : (
-              <>
-                <p className="field-hint">
-                  Leave this empty to always use the product's flat selling price. Add a row for every quantity break -
-                  e.g. 1+ at 10.00, 10+ at 9.00, 50+ at 8.00.
-                </p>
-                <table className="procurement-items-table">
-                  <thead>
-                    <tr>
-                      <th>From Quantity</th>
-                      <th>Unit Price</th>
-                      <th></th>
-                    </tr>
-                  </thead>
-                  <tbody>
-                    {tiersDialog.tiers.map((tier, index) => (
-                      <tr key={index}>
-                        <td><input type="number" min="0.01" step="0.01" value={tier.min_quantity} onChange={(e) => updateTierRow(index, 'min_quantity', e.target.value)} /></td>
-                        <td><input type="number" min="0" step="0.01" value={tier.unit_price} onChange={(e) => updateTierRow(index, 'unit_price', e.target.value)} /></td>
-                        <td>
-                          <button type="button" className="item-remove-btn" onClick={() => removeTierRow(index)} title="Remove tier">
-                            <TrashIcon className="menu-icon" />
-                          </button>
-                        </td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-                <AppButton variant="secondary" onClick={addTierRow} style={{ marginTop: '12px' }}>Add Quantity Range</AppButton>
-              </>
-            )}
-          </div>
-        </MasterModal>
-      ) : null}
-
-      {bulkPricingDialog.open ? (
-        <MasterModal
-          size="wide"
-          title={`Set Price for ${bulkPricingDialog.rows.length} Products`}
-          description="Update cost and markup for each selected product, or apply one markup to all of them."
-          onClose={closeBulkPricingDialog}
-          footer={
-            <>
-              <button type="button" className="master-button master-button-secondary" onClick={closeBulkPricingDialog}>
-                Cancel
-              </button>
-              <button type="button" className="master-button master-button-primary" onClick={saveBulkPricing} disabled={bulkPricingDialog.saving}>
-                {bulkPricingDialog.saving ? 'Saving...' : `Save Price for ${bulkPricingDialog.rows.length} Products`}
-              </button>
-            </>
-          }
-        >
-          <div className="modal-form">
-            {bulkPricingDialog.error ? <div className="status-banner status-banner-error">{bulkPricingDialog.error}</div> : null}
-
-            <div className="bulk-price-apply-row">
-              <div className="form-field">
-                <label>Apply Markup Type</label>
-                <select
-                  value={bulkPricingDialog.applyMarkupType}
-                  onChange={(event) => setBulkPricingDialog((previous) => ({ ...previous, applyMarkupType: event.target.value }))}
-                >
-                  <option value="fixed">Fixed</option>
-                  <option value="percentage">Percentage</option>
-                </select>
-              </div>
-              <div className="form-field">
-                <label>Apply Markup Value</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  placeholder="0.00"
-                  value={bulkPricingDialog.applyMarkupValue}
-                  onChange={(event) => setBulkPricingDialog((previous) => ({ ...previous, applyMarkupValue: event.target.value }))}
-                />
-              </div>
-              <button type="button" className="master-button master-button-secondary" onClick={applyMarkupToAllRows}>
-                Apply to All
-              </button>
-            </div>
-
-            <div className="bulk-price-table">
-              <table>
+              <table className="procurement-items-table">
                 <thead>
                   <tr>
-                    <th>Product</th>
+                    <th>Price Level</th>
                     <th>Cost Price</th>
                     <th>Markup Type</th>
                     <th>Markup Value</th>
@@ -1997,30 +1849,27 @@ const MasterDataManagement = ({ token, onLogout }) => {
                   </tr>
                 </thead>
                 <tbody>
-                  {bulkPricingDialog.rows.map((row) => (
-                    <tr key={row.id}>
-                      <td>{row.name}</td>
+                  {pricingDialog.rows.map((row, index) => (
+                    <tr key={row.price_level_id}>
+                      <td>{row.price_level_name}</td>
+                      <td><input type="number" min="0" step="0.01" value={row.cost_price} placeholder="Not set" onChange={(e) => updatePricingRow(index, 'cost_price', e.target.value)} /></td>
                       <td>
-                        <input type="number" step="0.01" value={row.cost_price} onChange={(event) => updateBulkPricingRow(row.id, 'cost_price', event.target.value)} />
-                      </td>
-                      <td>
-                        <select value={row.markup_type} onChange={(event) => updateBulkPricingRow(row.id, 'markup_type', event.target.value)}>
+                        <select value={row.markup_type} onChange={(e) => updatePricingRow(index, 'markup_type', e.target.value)}>
                           <option value="fixed">Fixed</option>
                           <option value="percentage">Percentage</option>
                         </select>
                       </td>
-                      <td>
-                        <input type="number" step="0.01" value={row.markup_value} onChange={(event) => updateBulkPricingRow(row.id, 'markup_value', event.target.value)} />
-                      </td>
-                      <td>{formatNumber(calculateSellingPriceFromValues(row))}</td>
+                      <td><input type="number" min="0" step="0.01" value={row.markup_value} placeholder="0.00" onChange={(e) => updatePricingRow(index, 'markup_value', e.target.value)} /></td>
+                      <td className="item-subtotal">{row.cost_price === '' ? '-' : formatNumber(calculateSellingPriceFromValues(row))}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
-            </div>
+            )}
           </div>
         </MasterModal>
       ) : null}
+
     </div>
   );
 };

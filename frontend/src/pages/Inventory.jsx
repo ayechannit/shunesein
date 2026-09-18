@@ -2,15 +2,18 @@ import React, { useEffect, useMemo, useRef, useState } from 'react';
 import '../styles/Procurement.css';
 import {
   AppButton,
+  ConfirmDialog,
   DataTable,
   EmptyState,
   MasterModal,
   PageHeader,
   Pagination,
+  PencilIcon,
   PlusIcon,
   RefreshIcon,
   SearchToolbar,
   StatusBadge,
+  TrashIcon,
   EyeIcon,
   CheckIcon,
   XCircleIcon,
@@ -23,14 +26,20 @@ import {
   fetchProductionBatches,
   fetchProductionBatchById,
   createProductionBatch,
+  updateProductionBatch,
+  deleteProductionBatch,
   updateProductionBatchStatus,
   fetchStockTransfers,
   fetchStockTransferById,
   createStockTransfer,
+  updateStockTransfer,
+  deleteStockTransfer,
   updateStockTransferStatus,
   fetchStockAdjustments,
   fetchStockAdjustmentById,
   createStockAdjustment,
+  updateStockAdjustment,
+  deleteStockAdjustment,
   fetchWarehouseStock,
   submitStockCount,
   fetchProducts,
@@ -168,11 +177,6 @@ const Inventory = ({ token, onLogout, embedded = false, defaultTab = 'batches', 
     return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
 
-  useEffect(() => {
-    if (!pageSuccess) return;
-    const timer = setTimeout(() => setPageSuccess(''), 3000);
-    return () => clearTimeout(timer);
-  }, [pageSuccess]);
 
   const productMap = useMemo(() => products.reduce((acc, p) => { acc[p.id] = p; return acc; }, {}), [products]);
 
@@ -215,7 +219,14 @@ const Inventory = ({ token, onLogout, embedded = false, defaultTab = 'batches', 
   const content = (
     <>
       {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Inventory', titleFor.title]} title={titleFor.title} description={titleFor.description} actions={null} /> : null}
-      {pageSuccess ? <div className="status-banner status-banner-success status-banner-autodismiss" style={{ marginBottom: '1rem' }}>{pageSuccess}</div> : null}
+      {pageSuccess ? (
+        <div className="status-banner status-banner-success" style={{ marginBottom: '1rem' }}>
+          <span>{pageSuccess}</span>
+          <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => setPageSuccess('')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      ) : null}
       {pageError ? <div className="status-banner status-banner-error" style={{ marginBottom: '1rem' }}>{pageError}</div> : null}
 
       {defaultTab === 'batches' && <ProductionBatchesTab {...shared} />}
@@ -239,6 +250,8 @@ const emptyBatchForm = () => ({
 
 const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions, finishedGoodOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError, hasPermission }) => {
   const canWrite = hasPermission('manage_production');
+  const canEdit = hasPermission('manage_production_edit');
+  const canDelete = hasPermission('manage_production_delete');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -248,6 +261,7 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState('create');
   const [formValues, setFormValues] = useState(emptyBatchForm());
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -257,6 +271,8 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
   const [completeItems, setCompleteItems] = useState([{ product_id: '', warehouse_id: '', quantity: '1', unit_cost: '0' }]);
   const [completeError, setCompleteError] = useState('');
   const [completeSaving, setCompleteSaving] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -286,9 +302,51 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
   const removeRawItem = (index) => setFormValues((prev) => ({ ...prev, raw_materials: prev.raw_materials.filter((_, i) => i !== index) }));
 
   const openCreate = () => {
+    setFormMode('create');
     setFormValues(emptyBatchForm());
     setFormErrors({});
     setFormOpen(true);
+  };
+
+  const handleEdit = async (row) => {
+    setMenuOpenId(null);
+    try {
+      const full = await fetchProductionBatchById(token, row.id);
+      setFormMode('edit');
+      setFormValues({
+        id: full.id,
+        batch_number: full.batch_number || '',
+        remark: full.remark || '',
+        raw_materials: (full.raw_materials || []).map((item) => ({
+          product_id: String(item.product_id),
+          warehouse_id: String(item.warehouse_id),
+          quantity: String(item.quantity),
+          unit_cost: item.unit_cost != null ? String(item.unit_cost) : '',
+        })),
+      });
+      setFormErrors({});
+      setFormOpen(true);
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setPageError(error.message || 'Unable to load batch for editing');
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setSaving(true);
+    setDeleteError('');
+    try {
+      await deleteProductionBatch(token, deleteTarget.id);
+      setPageSuccess('Production batch deleted.');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setDeleteError(error.message || 'Unable to delete batch');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeForm = () => { setFormOpen(false); load(); };
@@ -307,7 +365,7 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
 
     setSaving(true);
     try {
-      await createProductionBatch(token, {
+      const payload = {
         batch_number: formValues.batch_number || `BATCH-${Date.now()}`,
         remark: formValues.remark,
         raw_materials: formValues.raw_materials.map((item) => ({
@@ -316,8 +374,14 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
           quantity: Number(item.quantity),
           unit_cost: item.unit_cost ? Number(item.unit_cost) : null,
         })),
-      });
-      setPageSuccess('Production batch created.');
+      };
+      if (formMode === 'edit') {
+        await updateProductionBatch(token, formValues.id, payload);
+        setPageSuccess('Production batch updated.');
+      } else {
+        await createProductionBatch(token, payload);
+        setPageSuccess('Production batch created.');
+      }
       setFormOpen(false);
       await load();
     } catch (error) {
@@ -434,8 +498,10 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
     return (
       <div className="dropdown-menu-list">
         <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
+        {canEdit && status === 'pending' && <button type="button" className="dropdown-menu-item" onClick={() => handleEdit(row)}><PencilIcon className="menu-icon" /><span>Edit</span></button>}
         {canWrite && status === 'pending' && <button type="button" className="dropdown-menu-item" onClick={() => handleStart(row)}><CheckIcon className="menu-icon" /><span>Start Production</span></button>}
         {canWrite && status === 'in_progress' && <button type="button" className="dropdown-menu-item" onClick={() => openComplete(row)}><CheckIcon className="menu-icon" /><span>Complete</span></button>}
+        {canDelete && status === 'pending' && <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button>}
         {canWrite && (status === 'pending' || status === 'in_progress') && <button type="button" className="dropdown-menu-item danger" onClick={() => handleCancel(row)}><XCircleIcon className="menu-icon" /><span>Cancel</span></button>}
       </div>
     );
@@ -486,13 +552,13 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
       {formOpen ? (
         <MasterModal
           size="wide"
-          title="New Production Batch"
+          title={formMode === 'edit' ? 'Edit Production Batch' : 'New Production Batch'}
           description="Declare the raw materials this batch will consume."
           onClose={closeForm}
           footer={(
             <>
               <button type="button" className="master-button master-button-secondary" onClick={closeForm}>Cancel</button>
-              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : (formMode === 'edit' ? 'Update' : 'Save')}</button>
             </>
           )}
         >
@@ -682,6 +748,18 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
           </div>
         </MasterModal>
       ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete Production Batch?"
+          description={`Are you sure you want to delete ${deleteTarget.batch_number}? This action cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
+          onConfirm={handleDeleteConfirm}
+          loading={saving}
+          error={deleteError}
+        />
+      ) : null}
     </div>
   );
 };
@@ -702,6 +780,8 @@ const TRANSFER_ACTION_LABEL = { pending: 'Approve', approved: 'Mark Received', r
 
 const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError, hasPermission }) => {
   const canWrite = hasPermission('manage_stock');
+  const canEdit = hasPermission('manage_stock_edit');
+  const canDelete = hasPermission('manage_stock_delete');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -711,11 +791,14 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState('create');
   const [formValues, setFormValues] = useState(emptyTransferForm());
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [viewRecord, setViewRecord] = useState(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -745,9 +828,52 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
   const removeItem = (index) => setFormValues((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }));
 
   const openCreate = () => {
+    setFormMode('create');
     setFormValues(emptyTransferForm());
     setFormErrors({});
     setFormOpen(true);
+  };
+
+  const handleEdit = async (row) => {
+    setMenuOpenId(null);
+    try {
+      const full = await fetchStockTransferById(token, row.id);
+      setFormMode('edit');
+      setFormValues({
+        id: full.id,
+        transfer_number: full.transfer_number || '',
+        from_warehouse_id: full.from_warehouse_id ? String(full.from_warehouse_id) : '',
+        to_warehouse_id: full.to_warehouse_id ? String(full.to_warehouse_id) : '',
+        date: full.date ? full.date.slice(0, 10) : today(),
+        remark: full.remark || '',
+        items: (full.items || []).map((item) => ({
+          product_id: String(item.product_id),
+          quantity: String(item.quantity),
+        })),
+      });
+      setFormErrors({});
+      setFormOpen(true);
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setPageError(error.message || 'Unable to load transfer for editing');
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setSaving(true);
+    setDeleteError('');
+    try {
+      await deleteStockTransfer(token, deleteTarget.id);
+      setPageSuccess('Stock transfer deleted.');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setDeleteError(error.message || 'Unable to delete transfer');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeForm = () => { setFormOpen(false); load(); };
@@ -768,15 +894,21 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
 
     setSaving(true);
     try {
-      await createStockTransfer(token, {
+      const payload = {
         transfer_number: formValues.transfer_number || `TR-${Date.now()}`,
         from_warehouse_id: Number(formValues.from_warehouse_id),
         to_warehouse_id: Number(formValues.to_warehouse_id),
         date: formValues.date || new Date().toISOString().slice(0, 10),
         remark: formValues.remark,
         items: formValues.items.map((item) => ({ product_id: Number(item.product_id), quantity: Number(item.quantity) })),
-      });
-      setPageSuccess('Stock transfer created.');
+      };
+      if (formMode === 'edit') {
+        await updateStockTransfer(token, formValues.id, payload);
+        setPageSuccess('Stock transfer updated.');
+      } else {
+        await createStockTransfer(token, payload);
+        setPageSuccess('Stock transfer created.');
+      }
       setFormOpen(false);
       await load();
     } catch (error) {
@@ -832,10 +964,13 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
 
   const renderActions = (row) => {
     const nextLabel = TRANSFER_ACTION_LABEL[row.status];
+    const isEditable = row.status === 'pending' || row.status === 'approved';
     return (
       <div className="dropdown-menu-list">
         <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
+        {canEdit && isEditable && <button type="button" className="dropdown-menu-item" onClick={() => handleEdit(row)}><PencilIcon className="menu-icon" /><span>Edit</span></button>}
         {canWrite && nextLabel && <button type="button" className="dropdown-menu-item" onClick={() => handleAdvance(row)}><CheckIcon className="menu-icon" /><span>{nextLabel}</span></button>}
+        {canDelete && isEditable && <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button>}
       </div>
     );
   };
@@ -885,13 +1020,13 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
       {formOpen ? (
         <MasterModal
           size="wide"
-          title="New Stock Transfer"
+          title={formMode === 'edit' ? 'Edit Stock Transfer' : 'New Stock Transfer'}
           description="Move items from one warehouse to another."
           onClose={closeForm}
           footer={(
             <>
               <button type="button" className="master-button master-button-secondary" onClick={closeForm}>Cancel</button>
-              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : (formMode === 'edit' ? 'Update' : 'Save')}</button>
             </>
           )}
         >
@@ -1000,6 +1135,18 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
           )}
         </MasterModal>
       ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete Stock Transfer?"
+          description={`Are you sure you want to delete ${deleteTarget.transfer_number}? This action cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
+          onConfirm={handleDeleteConfirm}
+          loading={saving}
+          error={deleteError}
+        />
+      ) : null}
     </div>
   );
 };
@@ -1016,6 +1163,8 @@ const emptyAdjustmentForm = () => ({
 
 const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, setPageError, hasPermission }) => {
   const canWrite = hasPermission('manage_stock');
+  const canEdit = hasPermission('manage_stock_edit');
+  const canDelete = hasPermission('manage_stock_delete');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -1025,11 +1174,14 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState('create');
   const [formValues, setFormValues] = useState(emptyAdjustmentForm());
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
   const [viewRecord, setViewRecord] = useState(null);
   const [viewLoading, setViewLoading] = useState(false);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
 
   const load = async () => {
     setLoading(true);
@@ -1059,9 +1211,52 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
   const removeItem = (index) => setFormValues((prev) => ({ ...prev, items: prev.items.filter((_, i) => i !== index) }));
 
   const openCreate = () => {
+    setFormMode('create');
     setFormValues(emptyAdjustmentForm());
     setFormErrors({});
     setFormOpen(true);
+  };
+
+  const handleEdit = async (row) => {
+    setMenuOpenId(null);
+    try {
+      const full = await fetchStockAdjustmentById(token, row.id);
+      setFormMode('edit');
+      setFormValues({
+        id: full.id,
+        adjustment_number: full.adjustment_number || '',
+        warehouse_id: full.warehouse_id ? String(full.warehouse_id) : '',
+        date: full.date ? full.date.slice(0, 10) : today(),
+        reason: full.reason || '',
+        items: (full.items || []).map((item) => ({
+          product_id: String(item.product_id),
+          quantity: String(item.quantity),
+          type: item.type || 'manual',
+        })),
+      });
+      setFormErrors({});
+      setFormOpen(true);
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setPageError(error.message || 'Unable to load adjustment for editing');
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setSaving(true);
+    setDeleteError('');
+    try {
+      await deleteStockAdjustment(token, deleteTarget.id);
+      setPageSuccess('Stock adjustment deleted.');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setDeleteError(error.message || 'Unable to delete adjustment');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeForm = () => { setFormOpen(false); load(); };
@@ -1080,14 +1275,20 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
 
     setSaving(true);
     try {
-      await createStockAdjustment(token, {
+      const payload = {
         adjustment_number: formValues.adjustment_number || `ADJ-${Date.now()}`,
         warehouse_id: Number(formValues.warehouse_id),
         date: formValues.date || new Date().toISOString().slice(0, 10),
         reason: formValues.reason,
         items: formValues.items.map((item) => ({ product_id: Number(item.product_id), quantity: Number(item.quantity), type: item.type })),
-      });
-      setPageSuccess('Stock adjustment created.');
+      };
+      if (formMode === 'edit') {
+        await updateStockAdjustment(token, formValues.id, payload);
+        setPageSuccess('Stock adjustment updated.');
+      } else {
+        await createStockAdjustment(token, payload);
+        setPageSuccess('Stock adjustment created.');
+      }
       setFormOpen(false);
       await load();
     } catch (error) {
@@ -1128,6 +1329,8 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
   const renderActions = (row) => (
     <div className="dropdown-menu-list">
       <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
+      {canEdit && <button type="button" className="dropdown-menu-item" onClick={() => handleEdit(row)}><PencilIcon className="menu-icon" /><span>Edit</span></button>}
+      {canDelete && <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button>}
     </div>
   );
 
@@ -1176,13 +1379,13 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
       {formOpen ? (
         <MasterModal
           size="wide"
-          title="New Stock Adjustment"
+          title={formMode === 'edit' ? 'Edit Stock Adjustment' : 'New Stock Adjustment'}
           description="Positive quantities increase stock, negative quantities decrease it."
           onClose={closeForm}
           footer={(
             <>
               <button type="button" className="master-button master-button-secondary" onClick={closeForm}>Cancel</button>
-              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : (formMode === 'edit' ? 'Update' : 'Save')}</button>
             </>
           )}
         >
@@ -1281,6 +1484,18 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
             </div>
           )}
         </MasterModal>
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete Stock Adjustment?"
+          description={`Are you sure you want to delete ${deleteTarget.adjustment_number}? This reverses the stock and accounting effect. This action cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
+          onConfirm={handleDeleteConfirm}
+          loading={saving}
+          error={deleteError}
+        />
       ) : null}
     </div>
   );

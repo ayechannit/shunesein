@@ -116,6 +116,92 @@ class FinanceController {
     }
   };
 
+  // Reverses the old entry's account balance/GL effect, then reapplies the
+  // edited version against the (possibly different) category/account/amount.
+  updateEntry = async (req, res) => {
+    const { id } = req.params;
+    const { category_id, date, amount, account_id, description } = req.body;
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({ message: 'Amount must be a positive number' });
+    }
+    if (!category_id) {
+      return res.status(400).json({ message: 'category_id is required' });
+    }
+    if (!account_id) {
+      return res.status(400).json({ message: 'account_id is required' });
+    }
+
+    try {
+      const entry = await db.withTransaction(async (client) => {
+        const existingResult = await client.query('SELECT * FROM income_expense_entries WHERE id = $1 FOR UPDATE', [id]);
+        if (existingResult.rows.length === 0) {
+          throw new HttpError(404, 'Entry not found');
+        }
+        const existing = existingResult.rows[0];
+
+        const oldCatResult = await client.query('SELECT type FROM income_expense_categories WHERE id = $1', [existing.category_id]);
+        const oldCategoryType = oldCatResult.rows[0]?.type;
+        if (oldCategoryType && existing.account_id) {
+          const reversal = oldCategoryType === 'income' ? -Number(existing.amount) : Number(existing.amount);
+          await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [reversal, existing.account_id]);
+        }
+
+        const catResult = await client.query('SELECT * FROM income_expense_categories WHERE id = $1', [category_id]);
+        if (catResult.rows.length === 0) {
+          throw new HttpError(400, 'Category not found');
+        }
+        const category = catResult.rows[0];
+
+        const accountResult = await client.query('SELECT * FROM accounts WHERE id = $1 FOR UPDATE', [account_id]);
+        if (accountResult.rows.length === 0) {
+          throw new HttpError(400, 'Account not found');
+        }
+
+        const updateQuery = `
+          UPDATE income_expense_entries
+          SET category_id = $1, date = $2, amount = $3, account_id = $4, description = $5
+          WHERE id = $6
+          RETURNING *
+        `;
+        const updateResult = await client.query(updateQuery, [category_id, date, numericAmount, account_id, description, id]);
+        const updated = updateResult.rows[0];
+
+        const adjustment = category.type === 'income' ? numericAmount : -numericAmount;
+        await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [adjustment, account_id]);
+
+        await reverseJournalEntries(client, { referenceType: 'income_expense_entry', referenceId: id, date, description: 'Superseded by edit', createdBy: req.user.id });
+        await postJournalEntry(client, {
+          date: updated.date,
+          referenceType: 'income_expense_entry',
+          referenceId: updated.id,
+          description: updated.description || category.name,
+          createdBy: req.user.id,
+          lines: category.type === 'income'
+            ? [
+                { code: ACCOUNT_CODES.CASH_AND_BANK, debit: numericAmount },
+                { code: ACCOUNT_CODES.OTHER_INCOME, credit: numericAmount },
+              ]
+            : [
+                { code: ACCOUNT_CODES.OPERATING_EXPENSES, debit: numericAmount },
+                { code: ACCOUNT_CODES.CASH_AND_BANK, credit: numericAmount },
+              ],
+        });
+
+        await logAction(req.user.id, 'UPDATE', 'income_expense_entries', id, existing, updated, client);
+        return updated;
+      });
+
+      res.json({ message: 'Entry updated successfully', data: entry });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ message: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
   // Reverses the account balance adjustment the entry made, then removes it.
   deleteEntry = async (req, res) => {
     try {

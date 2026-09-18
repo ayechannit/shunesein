@@ -196,6 +196,134 @@ class PaymentController {
     }
   };
 
+  // Update a payment - reverses this payment's old effects (account balance,
+  // supplier/customer balance, GL entry) the same way delete() does, then
+  // re-validates the new amount against the remaining balance (excluding
+  // this payment) and reapplies create()'s logic against the new values.
+  // The transaction it's paying against (transaction_type/transaction_id)
+  // cannot be changed - same convention as invoices/vouchers blocking a
+  // warehouse change on edit.
+  update = async (req, res) => {
+    const { id } = req.params;
+    const { payment_date, payment_method_id, amount, reference_no, bank_name, note, account_id } = req.body;
+
+    const numericAmount = Number(amount);
+    if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
+      return res.status(400).json({ message: 'Payment amount must be a positive number' });
+    }
+    if (!payment_method_id) {
+      return res.status(400).json({ message: 'Payment method is required' });
+    }
+
+    try {
+      const result = await db.withTransaction(async (client) => {
+        const existingResult = await client.query('SELECT * FROM payments WHERE id = $1 FOR UPDATE', [id]);
+        if (existingResult.rows.length === 0) {
+          throw new HttpError(404, 'Payment not found');
+        }
+        const existing = existingResult.rows[0];
+
+        const table = TRANSACTION_TABLES[existing.transaction_type];
+        const txResult = await client.query(`SELECT * FROM ${table} WHERE id = $1 FOR UPDATE`, [existing.transaction_id]);
+        if (txResult.rows.length === 0) {
+          throw new HttpError(404, existing.transaction_type === 'purchase' ? 'Purchase voucher not found' : 'Sales invoice not found');
+        }
+        const transaction = txResult.rows[0];
+        const documentLabel = existing.transaction_type === 'purchase' ? 'voucher' : 'invoice';
+
+        // Reverse this payment's old effects first (same math as delete()).
+        if (existing.account_id) {
+          const oldAdjustment = existing.transaction_type === 'purchase' ? Number(existing.amount) : -Number(existing.amount);
+          await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [oldAdjustment, existing.account_id]);
+        }
+        if (existing.transaction_type === 'purchase' && transaction.supplier_id) {
+          await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2', [existing.amount, transaction.supplier_id]);
+        }
+        if (existing.transaction_type === 'sale' && transaction.customer_id) {
+          await client.query('UPDATE customers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2', [existing.amount, transaction.customer_id]);
+        }
+
+        // Re-validate the new amount against what's remaining, excluding this payment.
+        const paidResult = await client.query(
+          `SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE transaction_type = $1 AND transaction_id = $2 AND id != $3`,
+          [existing.transaction_type, existing.transaction_id, id]
+        );
+        const alreadyPaidExcl = Number(paidResult.rows[0].total_paid);
+        const netAmount = Number(transaction.net_amount);
+        const remaining = Math.round((netAmount - alreadyPaidExcl) * 100) / 100;
+
+        if (remaining <= 0) {
+          throw new HttpError(400, `This ${documentLabel} is already fully paid by other payments.`);
+        }
+        if (numericAmount > remaining + 0.01) {
+          throw new HttpError(400, `Payment exceeds outstanding balance. Remaining balance is ${remaining.toFixed(2)}.`);
+        }
+
+        const updateQuery = `
+          UPDATE payments
+          SET payment_date = $1, payment_method_id = $2, amount = $3, reference_no = $4, bank_name = $5, note = $6, account_id = $7
+          WHERE id = $8
+          RETURNING *
+        `;
+        const updateResult = await client.query(updateQuery, [
+          payment_date, payment_method_id, numericAmount, reference_no, bank_name, note, account_id || null, id,
+        ]);
+        const updated = updateResult.rows[0];
+
+        const newPaidTotal = alreadyPaidExcl + numericAmount;
+        const newStatus = newPaidTotal >= netAmount - 0.01 ? 'paid' : 'partial';
+        await client.query(`UPDATE ${table} SET payment_status = $1 WHERE id = $2`, [newStatus, existing.transaction_id]);
+
+        if (account_id) {
+          const newAdjustment = existing.transaction_type === 'purchase' ? -numericAmount : numericAmount;
+          await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [newAdjustment, account_id]);
+        }
+        if (existing.transaction_type === 'purchase' && transaction.supplier_id) {
+          await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [numericAmount, transaction.supplier_id]);
+        }
+        if (existing.transaction_type === 'sale' && transaction.customer_id) {
+          await client.query('UPDATE customers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [numericAmount, transaction.customer_id]);
+        }
+
+        await reverseJournalEntries(client, { referenceType: 'payment', referenceId: id, date: payment_date, description: 'Superseded by edit', createdBy: req.user.id });
+        await postJournalEntry(client, {
+          date: updated.payment_date,
+          referenceType: 'payment',
+          referenceId: updated.id,
+          description: existing.transaction_type === 'purchase'
+            ? `Payment to supplier (voucher #${existing.transaction_id}) (edited)`
+            : `Payment from customer (invoice #${existing.transaction_id}) (edited)`,
+          createdBy: req.user.id,
+          lines: existing.transaction_type === 'purchase'
+            ? [
+                { code: ACCOUNT_CODES.ACCOUNTS_PAYABLE, debit: numericAmount },
+                { code: ACCOUNT_CODES.CASH_AND_BANK, credit: numericAmount },
+              ]
+            : [
+                { code: ACCOUNT_CODES.CASH_AND_BANK, debit: numericAmount },
+                { code: ACCOUNT_CODES.ACCOUNTS_RECEIVABLE, credit: numericAmount },
+              ],
+        });
+
+        await logAction(req.user.id, 'UPDATE', 'payments', id, existing, updated, client);
+
+        return { payment: updated, remainingBalance: Math.round((remaining - numericAmount) * 100) / 100, status: newStatus };
+      });
+
+      res.json({
+        message: 'Payment updated successfully',
+        data: result.payment,
+        remaining_balance: result.remainingBalance,
+        payment_status: result.status,
+      });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ message: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
   // Delete/undo a payment - the only way to remove a recorded payment, since a
   // voucher/invoice with payments can't itself be deleted. Reverses everything
   // create() did: recomputes payment_status from the remaining payments, and

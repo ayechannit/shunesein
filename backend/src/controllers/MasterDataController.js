@@ -21,6 +21,7 @@ const tableColumnFallbacks = {
   permissions: ['id', 'name', 'module', 'description'],
   users: ['id', 'username', 'password_hash', 'full_name', 'role_id', 'status', 'last_login', 'created_at', 'updated_at'],
   income_expense_categories: ['id', 'name', 'type', 'description'],
+  price_levels: ['id', 'name', 'description', 'created_at'],
 };
 
 const quoteIdentifier = (identifier) => `"${String(identifier).replace(/"/g, '""')}"`;
@@ -54,6 +55,14 @@ const importZeroDefaultColumns = {
   customers: ['outstanding_balance', 'credit_limit'],
   accounts: ['balance'],
   products: ['cost_price', 'markup_value', 'selling_price', 'min_stock_level'],
+};
+
+// Columns that must be present and non-blank on create/update, beyond
+// whatever the DB schema itself enforces - product_code/barcode are the
+// customer's stock-tracking identifiers and are not meant to be left blank,
+// even though the column itself is nullable at the DB level.
+const requiredColumnsByTable = {
+  products: ['product_code', 'barcode'],
 };
 
 /**
@@ -135,6 +144,16 @@ class MasterDataController {
     return nextPayload;
   }
 
+  // Returns a list of missing/blank required field names for this table, or
+  // an empty array if everything required is present.
+  static getMissingRequiredColumns(tableName, payload = {}) {
+    const required = requiredColumnsByTable[tableName] || [];
+    return required.filter((column) => {
+      const value = payload[column];
+      return value === undefined || value === null || String(value).trim() === '';
+    });
+  }
+
   static buildSelectClause(tableName, columns = []) {
     const safeColumns = (columns.length > 0 ? columns : tableColumnFallbacks[tableName] || []).filter(Boolean);
     return safeColumns.map((column) => quoteIdentifier(column)).join(', ');
@@ -167,6 +186,11 @@ class MasterDataController {
 
       if (keys.length === 0) {
         return res.status(400).json({ message: 'No valid fields provided' });
+      }
+
+      const missingRequired = MasterDataController.getMissingRequiredColumns(this.tableName, payloadWithDerivedFields);
+      if (missingRequired.length > 0) {
+        return res.status(400).json({ message: `Required field(s) missing: ${missingRequired.join(', ')}` });
       }
 
       const placeholders = keys.map((_, i) => `$${i + 1}`).join(', ');
@@ -280,6 +304,11 @@ class MasterDataController {
       const values = Object.values(payloadWithDerivedFields);
       if (keys.length === 0) {
         return res.status(400).json({ message: 'No valid fields provided' });
+      }
+
+      const missingRequired = MasterDataController.getMissingRequiredColumns(this.tableName, { ...oldRecord, ...payloadWithDerivedFields });
+      if (missingRequired.length > 0) {
+        return res.status(400).json({ message: `Required field(s) missing: ${missingRequired.join(', ')}` });
       }
 
       const setClause = keys.map((key, i) => `${quoteIdentifier(key)} = $${i + 1}`).join(', ');

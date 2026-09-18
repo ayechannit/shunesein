@@ -75,5 +75,34 @@ module.exports = {
   VIEW_REPORT_SALES_BY_CATEGORY: 'view_report_sales_by_category',
   VIEW_REPORT_PAYMENT_METHOD_ANALYSIS: 'view_report_payment_method_analysis',
   VIEW_AUDIT_LOG: 'view_audit_log',
-  MANAGE_PRICE_LISTS: 'manage_price_lists',
+  MANAGE_PRICE_LEVELS: 'manage_price_levels',
+  // Every transaction module below used to gate create/edit/delete with one
+  // shared MANAGE_X permission - split into _EDIT/_DELETE in migration 023 so
+  // a role can be allowed to edit a record without also being allowed to
+  // delete it (or vice versa). The base MANAGE_X permission still gates
+  // create (and read, where reads were open at all).
+  MANAGE_SALE_ORDERS_EDIT: 'manage_sale_orders_edit',
+  MANAGE_SALE_ORDERS_DELETE: 'manage_sale_orders_delete',
+  MANAGE_SALES_INVOICES_EDIT: 'manage_sales_invoices_edit',
+  MANAGE_SALES_INVOICES_DELETE: 'manage_sales_invoices_delete',
+  MANAGE_SALES_RETURNS_EDIT: 'manage_sales_returns_edit',
+  MANAGE_SALES_RETURNS_DELETE: 'manage_sales_returns_delete',
+  MANAGE_PURCHASE_ORDERS_EDIT: 'manage_purchase_orders_edit',
+  MANAGE_PURCHASE_ORDERS_DELETE: 'manage_purchase_orders_delete',
+  MANAGE_PURCHASE_VOUCHERS_EDIT: 'manage_purchase_vouchers_edit',
+  MANAGE_PURCHASE_VOUCHERS_DELETE: 'manage_purchase_vouchers_delete',
+  MANAGE_PURCHASE_RETURNS_EDIT: 'manage_purchase_returns_edit',
+  MANAGE_PURCHASE_RETURNS_DELETE: 'manage_purchase_returns_delete',
+  MANAGE_PRODUCTION_EDIT: 'manage_production_edit',
+  MANAGE_PRODUCTION_DELETE: 'manage_production_delete',
+  MANAGE_STOCK_EDIT: 'manage_stock_edit',
+  MANAGE_STOCK_DELETE: 'manage_stock_delete',
+  MANAGE_FINANCE_ENTRIES_EDIT: 'manage_finance_entries_edit',
+  MANAGE_FINANCE_ENTRIES_DELETE: 'manage_finance_entries_delete',
+  MANAGE_FINANCE_TRANSFERS_EDIT: 'manage_finance_transfers_edit',
+  MANAGE_FINANCE_TRANSFERS_DELETE: 'manage_finance_transfers_delete',
+  MANAGE_PAYMENTS_EDIT: 'manage_payments_edit',
+  MANAGE_PAYMENTS_DELETE: 'manage_payments_delete',
+  MANAGE_DELIVERY_EDIT: 'manage_delivery_edit',
+  MANAGE_DELIVERY_DELETE: 'manage_delivery_delete',
 };

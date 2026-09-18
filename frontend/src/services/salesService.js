@@ -116,6 +116,13 @@ export const createSalesReturn = async (token, payload) =>
     body: JSON.stringify(payload),
   });
 
+export const updateSalesReturn = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/sales/returns/${id}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
 export const deleteSalesReturn = async (token, id) =>
   buildRequest(`${API_ROOT}/sales/returns/${id}`, token, {
     method: 'DELETE',
@@ -127,11 +134,22 @@ export const fetchCustomers = async (token) => {
   return response.data || [];
 };
 
-// Quantity-tier price suggestion for a line - see PricingController.
-export const fetchSuggestedPrice = async (token, { product_id, quantity }) => {
-  const query = new URLSearchParams({ product_id: String(product_id), quantity: String(quantity || 1) });
+// Price suggestion for a line - if price_level_id is passed and the product
+// has a price set for it, that price wins; otherwise the product's flat
+// selling price is returned. See PricingController.
+export const fetchSuggestedPrice = async (token, { product_id, price_level_id }) => {
+  const params = { product_id: String(product_id) };
+  if (price_level_id) params.price_level_id = String(price_level_id);
+  const query = new URLSearchParams(params);
   const response = await buildRequest(`${API_ROOT}/pricing/suggest?${query.toString()}`, token);
   return response.unit_price;
+};
+
+// Price levels the current user's role is allowed to use - drives the Price
+// Level dropdown on Sale Orders / Sales Invoices.
+export const fetchAccessiblePriceLevels = async (token) => {
+  const response = await buildRequest(`${API_ROOT}/pricing/accessible-levels`, token);
+  return response.data || [];
 };
 
 // Products, warehouses, payment methods, accounts, and payment recording are
@@ -143,6 +161,7 @@ export {
   fetchAccounts,
   createPayment,
   fetchPayments,
+  updatePayment,
   deletePayment,
   logPrintAction,
 } from './procurementService';

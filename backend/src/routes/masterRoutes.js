@@ -12,6 +12,7 @@ const {
   MANAGE_ACCOUNTS,
   MANAGE_PAYMENT_METHODS,
   MANAGE_SETTINGS,
+  MANAGE_PRICE_LEVELS,
 } = require('../utils/permissions');
 const router = express.Router();
 
@@ -24,6 +25,7 @@ const warehouseCtrl = new MasterDataController('warehouses', ['name', 'location'
 const accountCtrl = new MasterDataController('accounts', ['name', 'bank_name', 'account_number']);
 const paymentMethodCtrl = new MasterDataController('payment_methods', ['name', 'code', 'description']);
 const productTypeCtrl = new MasterDataController('product_types', ['name']);
+const priceLevelCtrl = new MasterDataController('price_levels', ['name']);
 
 // Register Routes
 router.use('/categories', verifyToken, createMasterRouter(categoryCtrl, MANAGE_CATEGORIES));
@@ -33,6 +35,7 @@ router.use('/customers', verifyToken, createMasterRouter(customerCtrl, MANAGE_CU
 router.use('/warehouses', verifyToken, createMasterRouter(warehouseCtrl, MANAGE_WAREHOUSES));
 router.use('/accounts', verifyToken, createMasterRouter(accountCtrl, MANAGE_ACCOUNTS));
 router.use('/payment-methods', verifyToken, createMasterRouter(paymentMethodCtrl, MANAGE_PAYMENT_METHODS));
+router.use('/price-levels', verifyToken, createMasterRouter(priceLevelCtrl, MANAGE_PRICE_LEVELS));
 
 // Product types are fixed to "Raw Material" / "Finished Goods" - read-only
 // lookup for the Products form and Production pickers, no create/edit/delete

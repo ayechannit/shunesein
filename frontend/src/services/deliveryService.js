@@ -41,5 +41,17 @@ export const updateDeliveryStatus = async (token, id, payload) =>
     body: JSON.stringify(payload),
   });
 
+export const updateDelivery = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/deliveries/${id}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+export const deleteDelivery = async (token, id) =>
+  buildRequest(`${API_ROOT}/deliveries/${id}`, token, {
+    method: 'DELETE',
+  });
+
 // Sales invoices are shared with the Sales module - reused rather than duplicated here.
 export { fetchSalesInvoices } from './salesService';

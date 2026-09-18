@@ -91,8 +91,8 @@ export const MASTER_DATA_MODULES = {
       },
     ],
     fields: [
-      { key: 'product_code', label: 'Product Code', type: 'text', placeholder: 'Optional product code' },
-      { key: 'barcode', label: 'Barcode', type: 'text', placeholder: 'Optional barcode' },
+      { key: 'product_code', label: 'Product Code', type: 'text', required: true, placeholder: 'Product code' },
+      { key: 'barcode', label: 'Barcode', type: 'text', required: true, placeholder: 'Barcode' },
       { key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'Product name' },
       {
         key: 'category_id',
@@ -125,24 +125,10 @@ export const MASTER_DATA_MODULES = {
         ],
       },
     ],
-    // Pricing is set separately from creation (see the "Set Price" row action) -
-    // cost/markup/selling price live in their own dialog, not the create/edit form.
-    pricingFields: [
-      { key: 'cost_price', label: 'Cost Price', type: 'number', ...moneyField, placeholder: '0.00' },
-      {
-        key: 'markup_type',
-        label: 'Markup Type',
-        type: 'select',
-        options: [
-          { label: 'Fixed', value: 'fixed' },
-          { label: 'Percentage', value: 'percentage' },
-        ],
-      },
-      { key: 'markup_value', label: 'Markup Value', type: 'number', ...moneyField, placeholder: '0.00' },
-    ],
-    actions: ['set-price', 'quantity-pricing'],
-    // Enables row checkboxes + the "Set Price for N selected" bulk action.
-    bulkPricing: true,
+    // Pricing (cost/markup/selling price, Default plus every price level) is
+    // set separately from creation, in the "Set Price" row action's dialog,
+    // not the create/edit form.
+    actions: ['set-price'],
     // Toolbar dropdown filter(s). `lookupKey` reuses the same lookup data
     // already loaded for the form's Product Type select to build options.
     filters: [
@@ -153,7 +139,6 @@ export const MASTER_DATA_MODULES = {
       { key: 'name', label: 'Name', sortable: true },
       { key: 'category_id', label: 'Category' },
       { key: 'product_type_id', label: 'Product Type' },
-      { key: 'selling_price', label: 'Price', align: 'right' },
       { key: 'status', label: 'Status', sortable: true },
       { key: 'created_at', label: 'Created' },
     ],
@@ -164,42 +149,71 @@ export const MASTER_DATA_MODULES = {
       { label: 'Name Z-A', value: 'name-desc' },
       { label: 'Code A-Z', value: 'product_code-asc' },
       { label: 'Code Z-A', value: 'product_code-desc' },
-      { label: 'Price low-high', value: 'selling_price-asc' },
-      { label: 'Price high-low', value: 'selling_price-desc' },
     ],
   },
-  'pricing-tiers': {
-    key: 'pricing-tiers',
+  'price-levels': {
+    key: 'price-levels',
     group: 'Master Data',
-    label: 'Quantity Pricing',
-    entityLabel: 'Pricing Tier',
-    title: 'Quantity Pricing',
-    description: 'Every quantity-based price tier across all products, in one place.',
-    apiBase: `${API_ROOT}/pricing/tiers`,
+    label: 'Price Levels',
+    entityLabel: 'Price Level',
+    title: 'Price Levels',
+    description: 'Named pricing tiers (e.g. Retail, Wholesale, VIP) - which ones a role can use in Sales is set on the Roles screen.',
+    apiBase: `${API_ROOT}/master/price-levels`,
+    searchFields: ['name'],
+    defaultSort: { sortBy: 'id', order: 'DESC' },
+    createButtonLabel: 'New Price Level',
+    saveButtonLabel: 'Save Price Level',
+    emptyState: {
+      title: 'No price levels yet',
+      description: 'Create a price level (e.g. Retail, Wholesale) to start setting per-level prices.',
+    },
+    fields: [
+      { key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'e.g. Wholesale' },
+      { key: 'description', label: 'Description', type: 'textarea', placeholder: 'Optional description' },
+    ],
+    columns: [
+      { key: 'id', label: 'ID', sortable: true, width: '84px' },
+      { key: 'name', label: 'Name', sortable: true },
+      { key: 'description', label: 'Description' },
+      { key: 'created_at', label: 'Created' },
+    ],
+    sortOptions: [
+      { label: 'Newest first', value: 'id-desc' },
+      { label: 'Oldest first', value: 'id-asc' },
+      { label: 'Name A-Z', value: 'name-asc' },
+      { label: 'Name Z-A', value: 'name-desc' },
+    ],
+  },
+  'price-level-pricing': {
+    key: 'price-level-pricing',
+    group: 'Master Data',
+    label: 'Price Level Pricing',
+    entityLabel: 'Level Price',
+    title: 'Price Level Pricing',
+    description: 'Every product\'s price at every price level, in one place.',
+    apiBase: `${API_ROOT}/pricing/level-prices`,
     searchFields: ['product_name', 'product_code'],
     defaultSort: { sortBy: 'product_name', order: 'ASC' },
     createButtonLabel: '',
     saveButtonLabel: '',
     emptyState: {
-      title: 'No quantity pricing set yet',
-      description: 'Open a product and use "Quantity Pricing" to add tiers.',
+      title: 'No price level pricing set yet',
+      description: 'Open a product and use "Price Level Pricing" to set prices.',
     },
     readOnly: true,
-    actions: ['quantity-pricing'],
+    actions: ['price-level-pricing'],
     fields: [],
     columns: [
       { key: 'product_name', label: 'Product', sortable: true },
       { key: 'product_code', label: 'Code' },
-      { key: 'min_quantity', label: 'From Qty', align: 'right', sortable: true },
-      { key: 'unit_price', label: 'Unit Price', align: 'right', sortable: true },
+      { key: 'price_level_name', label: 'Price Level' },
+      { key: 'price', label: 'Price', align: 'right', sortable: true },
     ],
     sortOptions: [
       { label: 'Product A-Z', value: 'product_name-asc' },
       { label: 'Product Z-A', value: 'product_name-desc' },
-      { label: 'Quantity low-high', value: 'min_quantity-asc' },
-      { label: 'Quantity high-low', value: 'min_quantity-desc' },
-      { label: 'Price low-high', value: 'unit_price-asc' },
-      { label: 'Price high-low', value: 'unit_price-desc' },
+      { label: 'Price low-high', value: 'price-asc' },
+      { label: 'Price high-low', value: 'price-desc' },
     ],
   },
   suppliers: {
@@ -1657,7 +1671,8 @@ export const MASTER_DATA_MODULE_ORDER = [
   'dashboard',
   'categories',
   'products',
-  'pricing-tiers',
+  'price-levels',
+  'price-level-pricing',
   'suppliers',
   'customers',
   'warehouses',

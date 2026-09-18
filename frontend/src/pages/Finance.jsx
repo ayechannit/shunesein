@@ -8,6 +8,7 @@ import {
   MasterModal,
   PageHeader,
   Pagination,
+  PencilIcon,
   PlusIcon,
   RefreshIcon,
   SearchToolbar,
@@ -19,9 +20,11 @@ import {
   fetchIncomeExpenseCategories,
   fetchEntries,
   createEntry,
+  updateEntry,
   deleteEntry,
   fetchTransfers,
   createTransfer,
+  updateTransfer,
   deleteTransfer,
   fetchAccountLedger,
   fetchAccounts,
@@ -65,11 +68,6 @@ const Finance = ({ token, onLogout, embedded = false, defaultTab = 'entries', ha
     return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
 
-  useEffect(() => {
-    if (!pageSuccess) return;
-    const timer = setTimeout(() => setPageSuccess(''), 3000);
-    return () => clearTimeout(timer);
-  }, [pageSuccess]);
 
   const shared = { token, onLogout, accounts, categories, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, hasPermission };
 
@@ -82,7 +80,14 @@ const Finance = ({ token, onLogout, embedded = false, defaultTab = 'entries', ha
   const content = (
     <>
       {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Finance', titleFor.title]} title={titleFor.title} description={titleFor.description} actions={null} /> : null}
-      {pageSuccess ? <div className="status-banner status-banner-success status-banner-autodismiss" style={{ marginBottom: '1rem' }}>{pageSuccess}</div> : null}
+      {pageSuccess ? (
+        <div className="status-banner status-banner-success" style={{ marginBottom: '1rem' }}>
+          <span>{pageSuccess}</span>
+          <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => setPageSuccess('')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      ) : null}
 
       {defaultTab === 'entries' && <EntriesTab {...shared} />}
       {defaultTab === 'transfers' && <TransfersTab {...shared} />}
@@ -100,6 +105,8 @@ const emptyEntryForm = () => ({ category_id: '', date: today(), amount: '', acco
 
 const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, hasPermission }) => {
   const canWrite = hasPermission('manage_finance_entries');
+  const canEdit = hasPermission('manage_finance_entries_edit');
+  const canDelete = hasPermission('manage_finance_entries_delete');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -109,6 +116,7 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState('create');
   const [formValues, setFormValues] = useState(emptyEntryForm());
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -136,7 +144,23 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
   useEffect(() => { load(); }, [page, pageSize, search, sort]);
 
   const openCreate = () => {
+    setFormMode('create');
     setFormValues(emptyEntryForm());
+    setFormErrors({});
+    setFormOpen(true);
+  };
+
+  const handleEdit = (row) => {
+    setMenuOpenId(null);
+    setFormMode('edit');
+    setFormValues({
+      id: row.id,
+      category_id: row.category_id ? String(row.category_id) : '',
+      date: row.date ? String(row.date).slice(0, 10) : today(),
+      amount: String(row.amount),
+      account_id: row.account_id ? String(row.account_id) : '',
+      description: row.description || '',
+    });
     setFormErrors({});
     setFormOpen(true);
   };
@@ -155,14 +179,20 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
 
     setSaving(true);
     try {
-      await createEntry(token, {
+      const payload = {
         category_id: Number(formValues.category_id),
         account_id: Number(formValues.account_id),
         amount: Number(formValues.amount),
         date: formValues.date || new Date().toISOString().slice(0, 10),
         description: formValues.description,
-      });
-      setPageSuccess('Entry recorded.');
+      };
+      if (formMode === 'edit') {
+        await updateEntry(token, formValues.id, payload);
+        setPageSuccess('Entry updated.');
+      } else {
+        await createEntry(token, payload);
+        setPageSuccess('Entry recorded.');
+      }
       setFormOpen(false);
       await load();
     } catch (error) {
@@ -206,14 +236,15 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
 
   const renderCell = (row, column) => {
     if (column.key === 'date') return formatDate(row.date);
-    if (column.key === 'category_name') return <span>{row.category_name} <StatusBadge value={row.category_type === 'income' ? 'active' : 'inactive'} /></span>;
+    if (column.key === 'category_name') return <span>{row.category_name} <StatusBadge value={row.category_type === 'income' ? 'Income' : 'Expense'} type={row.category_type === 'income' ? 'success' : 'default'} /></span>;
     if (column.key === 'amount') return formatNumber(row.amount);
     return row[column.key] ?? '-';
   };
 
-  const renderActions = (row) => canWrite ? (
+  const renderActions = (row) => (canEdit || canDelete) ? (
     <div className="dropdown-menu-list">
-      <button type="button" className="dropdown-menu-item danger" onClick={() => handleDeleteRequest(row)}><TrashIcon className="menu-icon" /><span>Delete</span></button>
+      {canEdit ? <button type="button" className="dropdown-menu-item" onClick={() => handleEdit(row)}><PencilIcon className="menu-icon" /><span>Edit</span></button> : null}
+      {canDelete ? <button type="button" className="dropdown-menu-item danger" onClick={() => handleDeleteRequest(row)}><TrashIcon className="menu-icon" /><span>Delete</span></button> : null}
     </div>
   ) : (
     <div className="dropdown-menu-list"><span className="dropdown-menu-item" style={{ color: 'var(--md-muted)', cursor: 'default' }}>No actions available</span></div>
@@ -263,13 +294,13 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
 
       {formOpen ? (
         <MasterModal
-          title="New Income / Expense Entry"
+          title={formMode === 'edit' ? 'Edit Income / Expense Entry' : 'New Income / Expense Entry'}
           description="Categories are managed under Master Data > Income Expense Categories."
           onClose={closeForm}
           footer={(
             <>
               <button type="button" className="master-button master-button-secondary" onClick={closeForm}>Cancel</button>
-              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : (formMode === 'edit' ? 'Update' : 'Save')}</button>
             </>
           )}
         >
@@ -331,6 +362,8 @@ const emptyTransferForm = () => ({ transfer_number: '', from_account_id: '', to_
 
 const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuOpenId, setPageSuccess, hasPermission }) => {
   const canWrite = hasPermission('manage_finance_transfers');
+  const canEdit = hasPermission('manage_finance_transfers_edit');
+  const canDelete = hasPermission('manage_finance_transfers_delete');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -340,6 +373,7 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState('create');
   const [formValues, setFormValues] = useState(emptyTransferForm());
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -365,7 +399,24 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
   useEffect(() => { load(); }, [page, pageSize, search, sort]);
 
   const openCreate = () => {
+    setFormMode('create');
     setFormValues(emptyTransferForm());
+    setFormErrors({});
+    setFormOpen(true);
+  };
+
+  const handleEdit = (row) => {
+    setMenuOpenId(null);
+    setFormMode('edit');
+    setFormValues({
+      id: row.id,
+      transfer_number: row.transfer_number || '',
+      from_account_id: row.from_account_id ? String(row.from_account_id) : '',
+      to_account_id: row.to_account_id ? String(row.to_account_id) : '',
+      amount: String(row.amount),
+      date: row.date ? String(row.date).slice(0, 10) : today(),
+      remark: row.remark || '',
+    });
     setFormErrors({});
     setFormOpen(true);
   };
@@ -385,15 +436,21 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
 
     setSaving(true);
     try {
-      await createTransfer(token, {
+      const payload = {
         transfer_number: formValues.transfer_number || `FT-${Date.now()}`,
         from_account_id: Number(formValues.from_account_id),
         to_account_id: Number(formValues.to_account_id),
         amount: Number(formValues.amount),
         date: formValues.date || new Date().toISOString().slice(0, 10),
         remark: formValues.remark,
-      });
-      setPageSuccess('Fund transfer recorded.');
+      };
+      if (formMode === 'edit') {
+        await updateTransfer(token, formValues.id, payload);
+        setPageSuccess('Fund transfer updated.');
+      } else {
+        await createTransfer(token, payload);
+        setPageSuccess('Fund transfer recorded.');
+      }
       setFormOpen(false);
       await load();
     } catch (error) {
@@ -441,9 +498,10 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
     return row[column.key] ?? '-';
   };
 
-  const renderActions = (row) => canWrite ? (
+  const renderActions = (row) => (canEdit || canDelete) ? (
     <div className="dropdown-menu-list">
-      <button type="button" className="dropdown-menu-item danger" onClick={() => handleDeleteRequest(row)}><TrashIcon className="menu-icon" /><span>Delete</span></button>
+      {canEdit ? <button type="button" className="dropdown-menu-item" onClick={() => handleEdit(row)}><PencilIcon className="menu-icon" /><span>Edit</span></button> : null}
+      {canDelete ? <button type="button" className="dropdown-menu-item danger" onClick={() => handleDeleteRequest(row)}><TrashIcon className="menu-icon" /><span>Delete</span></button> : null}
     </div>
   ) : (
     <div className="dropdown-menu-list"><span className="dropdown-menu-item" style={{ color: 'var(--md-muted)', cursor: 'default' }}>No actions available</span></div>
@@ -493,13 +551,13 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
 
       {formOpen ? (
         <MasterModal
-          title="New Fund Transfer"
+          title={formMode === 'edit' ? 'Edit Fund Transfer' : 'New Fund Transfer'}
           description="Move money between two of your own accounts (deposit, withdrawal, or transfer)."
           onClose={closeForm}
           footer={(
             <>
               <button type="button" className="master-button master-button-secondary" onClick={closeForm}>Cancel</button>
-              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : (formMode === 'edit' ? 'Update' : 'Save')}</button>
             </>
           )}
         >

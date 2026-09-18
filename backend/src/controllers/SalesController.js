@@ -311,6 +311,7 @@ class SalesController {
             'UPDATE stock_levels SET quantity = quantity + $1 WHERE warehouse_id = $2 AND product_id = $3',
             [item.quantity, warehouse_id, item.product_id]
           );
+          await recordStockTransaction(client, item.product_id, warehouse_id, Number(item.quantity), 'sale_edit_reversal', id);
         }
 
         let total_amount = 0;
@@ -353,6 +354,7 @@ class SalesController {
             'UPDATE stock_levels SET quantity = quantity - $1 WHERE warehouse_id = $2 AND product_id = $3',
             [item.quantity, warehouse_id, item.product_id]
           );
+          await recordStockTransaction(client, item.product_id, warehouse_id, -Number(item.quantity), 'sale_edit', id);
 
           const productResult = await client.query('SELECT cost_price FROM products WHERE id = $1', [item.product_id]);
           cogsTotal += Number(item.quantity) * Number(productResult.rows[0]?.cost_price || 0);
@@ -747,6 +749,124 @@ class SalesController {
       });
 
       res.status(201).json({ id: ret.id, message: 'Sales return recorded successfully' });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Update Sales Return - pulls the old return's stock back out (blocked if
+  // it's already moved on elsewhere, same guard deleteReturn uses), then
+  // reapplies the edited version. Mirrors updateInvoice's "reverse old,
+  // reapply new" idiom.
+  updateReturn = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { customer_id, warehouse_id, return_date, reason, items } = req.body;
+      const invoice_id = req.body.invoice_id ? Number(req.body.invoice_id) : null;
+
+      if (!items || items.length === 0) {
+        return res.status(400).json({ error: 'At least one item is required' });
+      }
+
+      const existing = await db.query('SELECT * FROM sales_returns WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Sales return not found' });
+      }
+      if (existing.rows[0].warehouse_id !== warehouse_id) {
+        return res.status(400).json({ error: 'Changing the warehouse on an existing return is not supported - delete and recreate it instead' });
+      }
+
+      const ret = await db.withTransaction(async (client) => {
+        const oldItemsResult = await client.query('SELECT product_id, quantity FROM sales_return_items WHERE return_id = $1', [id]);
+
+        for (const item of oldItemsResult.rows) {
+          const stockResult = await client.query(
+            'SELECT quantity FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2 FOR UPDATE',
+            [warehouse_id, item.product_id]
+          );
+          const currentQty = Number(stockResult.rows[0]?.quantity || 0);
+          if (currentQty < Number(item.quantity)) {
+            throw new HttpError(400, 'Cannot edit: the returned stock has already moved (sold, transferred, or adjusted). Reverse those movements before editing.');
+          }
+        }
+        for (const item of oldItemsResult.rows) {
+          await client.query('UPDATE stock_levels SET quantity = quantity - $1 WHERE warehouse_id = $2 AND product_id = $3', [item.quantity, warehouse_id, item.product_id]);
+          await recordStockTransaction(client, item.product_id, warehouse_id, -Number(item.quantity), 'sales_return_edit_reversal', id);
+        }
+
+        let total_amount = 0;
+        for (const item of items) {
+          total_amount += Number(item.quantity) * Number(item.unit_price);
+        }
+
+        const updateQuery = `
+          UPDATE sales_returns
+          SET customer_id = $1, invoice_id = $2, return_date = $3, reason = $4, total_amount = $5
+          WHERE id = $6
+          RETURNING *
+        `;
+        const updateResult = await client.query(updateQuery, [customer_id, invoice_id, return_date, reason || null, total_amount, id]);
+        const updated = updateResult.rows[0];
+
+        await client.query('DELETE FROM sales_return_items WHERE return_id = $1', [id]);
+        const itemQuery = `INSERT INTO sales_return_items (return_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4)`;
+        let cogsReversal = 0;
+        for (const item of items) {
+          await client.query(itemQuery, [id, item.product_id, item.quantity, item.unit_price]);
+          await client.query(
+            `INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3)
+             ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3`,
+            [warehouse_id, item.product_id, item.quantity]
+          );
+          await recordStockTransaction(client, item.product_id, warehouse_id, Number(item.quantity), 'sales_return_edit', id);
+
+          const productResult = await client.query('SELECT cost_price FROM products WHERE id = $1', [item.product_id]);
+          cogsReversal += Number(item.quantity) * Number(productResult.rows[0]?.cost_price || 0);
+        }
+
+        // Reconcile customer outstanding_balance the same delta-or-full-reverse
+        // way updateInvoice does (sign flipped, since returns reduce what's owed).
+        const oldCustomerId = existing.rows[0].customer_id;
+        const oldTotalAmount = Number(existing.rows[0].total_amount);
+        const newTotalAmount = Number(updated.total_amount);
+
+        if (oldCustomerId && customer_id && oldCustomerId === customer_id) {
+          const balanceDelta = newTotalAmount - oldTotalAmount;
+          if (balanceDelta !== 0) {
+            await client.query('UPDATE customers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [balanceDelta, customer_id]);
+          }
+        } else {
+          if (oldCustomerId) {
+            await client.query('UPDATE customers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2', [oldTotalAmount, oldCustomerId]);
+          }
+          if (customer_id) {
+            await client.query('UPDATE customers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [newTotalAmount, customer_id]);
+          }
+        }
+
+        await reverseJournalEntries(client, { referenceType: 'sales_return', referenceId: id, date: return_date, description: 'Superseded by edit', createdBy: req.user.id });
+        await postJournalEntry(client, {
+          date: updated.return_date,
+          referenceType: 'sales_return',
+          referenceId: updated.id,
+          description: `Sales Return ${updated.return_number} (edited)`,
+          createdBy: req.user.id,
+          lines: [
+            { code: ACCOUNT_CODES.SALES_REVENUE, debit: newTotalAmount },
+            { code: ACCOUNT_CODES.ACCOUNTS_RECEIVABLE, credit: newTotalAmount },
+            { code: ACCOUNT_CODES.INVENTORY, debit: cogsReversal },
+            { code: ACCOUNT_CODES.COST_OF_GOODS_SOLD, credit: cogsReversal },
+          ],
+        });
+
+        await logAction(req.user.id, 'UPDATE', 'sales_returns', id, existing.rows[0], updated, client);
+        return updated;
+      });
+
+      res.json({ message: 'Sales return updated successfully', data: ret });
     } catch (error) {
       if (error instanceof HttpError) {
         return res.status(error.statusCode).json({ error: error.message });

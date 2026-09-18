@@ -2,21 +2,26 @@ import React, { useEffect, useRef, useState } from 'react';
 import '../styles/Procurement.css';
 import {
   AppButton,
+  ConfirmDialog,
   DataTable,
   EmptyState,
   MasterModal,
   PageHeader,
   Pagination,
+  PencilIcon,
   PlusIcon,
   RefreshIcon,
   SearchToolbar,
   StatusBadge,
+  TrashIcon,
   CheckIcon,
   XCircleIcon,
 } from '../components/masterData/MasterDataPrimitives';
 import {
   fetchDeliveries,
   createDelivery,
+  updateDelivery,
+  deleteDelivery,
   updateDeliveryStatus,
   fetchSalesInvoices,
 } from '../services/deliveryService';
@@ -33,6 +38,8 @@ const NEXT_STATUS_ACTIONS = {
 
 const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => true }) => {
   const canWrite = hasPermission('manage_delivery');
+  const canEdit = hasPermission('manage_delivery_edit');
+  const canDelete = hasPermission('manage_delivery_delete');
   const [invoices, setInvoices] = useState([]);
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
@@ -43,6 +50,7 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
   const [loading, setLoading] = useState(false);
   const [listError, setListError] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState('create');
   const [formValues, setFormValues] = useState(emptyForm());
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -50,6 +58,8 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
   const [error, setError] = useState('');
   const [menuOpenId, setMenuOpenId] = useState(null);
   const [invoicePickerFilter, setInvoicePickerFilter] = useState('');
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -72,11 +82,6 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
     return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
 
-  useEffect(() => {
-    if (!success) return;
-    const timer = setTimeout(() => setSuccess(''), 3000);
-    return () => clearTimeout(timer);
-  }, [success]);
 
   const load = async () => {
     setLoading(true);
@@ -96,10 +101,45 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
   useEffect(() => { load(); }, [page, pageSize, search, sort]);
 
   const openCreate = () => {
+    setFormMode('create');
     setFormValues(emptyForm());
     setFormErrors({});
     setInvoicePickerFilter('');
     setFormOpen(true);
+  };
+
+  const handleEdit = (row) => {
+    setMenuOpenId(null);
+    setFormMode('edit');
+    setFormValues({
+      id: row.id,
+      delivery_number: row.delivery_number || '',
+      invoice_ids: row.invoice_ids || [],
+      date: row.date ? String(row.date).slice(0, 10) : today(),
+      vehicle_info: row.vehicle_info || '',
+      driver_name: row.driver_name || '',
+      remark: row.remark || '',
+    });
+    setFormErrors({});
+    setInvoicePickerFilter('');
+    setFormOpen(true);
+  };
+
+  const handleDeleteConfirm = async () => {
+    if (!deleteTarget) return;
+    setSaving(true);
+    setDeleteError('');
+    try {
+      await deleteDelivery(token, deleteTarget.id);
+      setSuccess('Delivery deleted.');
+      setDeleteTarget(null);
+      await load();
+    } catch (err) {
+      if (err.status === 401) return onLogout();
+      setDeleteError(err.message || 'Unable to delete delivery');
+    } finally {
+      setSaving(false);
+    }
   };
 
   const closeForm = () => { setFormOpen(false); load(); };
@@ -126,15 +166,21 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
 
     setSaving(true);
     try {
-      await createDelivery(token, {
+      const payload = {
         delivery_number: formValues.delivery_number || `DEL-${Date.now()}`,
         invoice_ids: formValues.invoice_ids,
         date: formValues.date || new Date().toISOString().slice(0, 10),
         vehicle_info: formValues.vehicle_info,
         driver_name: formValues.driver_name,
         remark: formValues.remark,
-      });
-      setSuccess('Delivery created.');
+      };
+      if (formMode === 'edit') {
+        await updateDelivery(token, formValues.id, payload);
+        setSuccess('Delivery updated.');
+      } else {
+        await createDelivery(token, payload);
+        setSuccess('Delivery created.');
+      }
       setFormOpen(false);
       await load();
     } catch (err) {
@@ -185,12 +231,20 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
   };
 
   const renderActions = (row) => {
+    const isPending = row.status === 'pending';
     const nextActions = canWrite ? (NEXT_STATUS_ACTIONS[row.status] || []) : [];
-    if (nextActions.length === 0) {
+    const hasEditOrDelete = (canEdit || canDelete) && isPending;
+    if (nextActions.length === 0 && !hasEditOrDelete) {
       return <div className="dropdown-menu-list"><span className="dropdown-menu-item" style={{ color: 'var(--md-muted)', cursor: 'default' }}>No actions available</span></div>;
     }
     return (
       <div className="dropdown-menu-list">
+        {canEdit && isPending && (
+          <button type="button" className="dropdown-menu-item" onClick={() => handleEdit(row)}>
+            <PencilIcon className="menu-icon" />
+            <span>Edit</span>
+          </button>
+        )}
         {nextActions.map((action) => (
           <button
             key={action.status}
@@ -202,6 +256,12 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
             <span>{action.label}</span>
           </button>
         ))}
+        {canDelete && isPending && (
+          <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}>
+            <TrashIcon className="menu-icon" />
+            <span>Delete</span>
+          </button>
+        )}
       </div>
     );
   };
@@ -209,7 +269,14 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
   const content = (
     <>
       {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Sales', 'Delivery']} title="Delivery" description="Schedule deliveries and track vehicle, driver, and status." actions={null} /> : null}
-      {success ? <div className="status-banner status-banner-success status-banner-autodismiss" style={{ marginBottom: '1rem' }}>{success}</div> : null}
+      {success ? (
+        <div className="status-banner status-banner-success" style={{ marginBottom: '1rem' }}>
+          <span>{success}</span>
+          <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => setSuccess('')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      ) : null}
       {error ? <div className="status-banner status-banner-error" style={{ marginBottom: '1rem' }}>{error}</div> : null}
 
       <div className="procurement-shell">
@@ -258,13 +325,13 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
 
       {formOpen ? (
         <MasterModal
-          title="New Delivery"
+          title={formMode === 'edit' ? 'Edit Delivery' : 'New Delivery'}
           description="Schedule a delivery for a sales invoice."
           onClose={closeForm}
           footer={(
             <>
               <button type="button" className="master-button master-button-secondary" onClick={closeForm}>Cancel</button>
-              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save'}</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : (formMode === 'edit' ? 'Update' : 'Save')}</button>
             </>
           )}
         >
@@ -329,6 +396,18 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
             </div>
           </div>
         </MasterModal>
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete Delivery?"
+          description={`Are you sure you want to delete ${deleteTarget.delivery_number}? This action cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
+          onConfirm={handleDeleteConfirm}
+          loading={saving}
+          error={deleteError}
+        />
       ) : null}
     </>
   );

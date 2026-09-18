@@ -469,6 +469,10 @@ input[type="radio"] { accent-color: var(--md-primary); }
    STATUS BADGES
    ═══════════════════════════════════════════════════════════════ */
 .status-banner {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
   padding: 10px 14px;
   border: 1px solid var(--md-border);
   border-radius: var(--md-radius);
@@ -478,12 +482,24 @@ input[type="radio"] { accent-color: var(--md-primary); }
 .status-banner-error { border-color: #fecaca; background: var(--md-danger-soft); color: var(--md-danger); }
 .status-banner-success { border-color: #bbf7d0; background: var(--md-success-soft); color: var(--md-success); }
 
-/* Paired with a JS timer that clears the message at 3s - the fade covers the last ~500ms so it doesn't just vanish. */
-.status-banner-autodismiss { animation: statusBannerFadeOut 3s ease forwards; }
-@keyframes statusBannerFadeOut {
-  0%, 83% { opacity: 1; }
-  100% { opacity: 0; }
+/* Manual dismiss button shown on banners the user can close themselves -
+   messages stay on screen until acted on, never auto-hidden by a timer. */
+.status-banner-close {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: transparent;
+  color: inherit;
+  opacity: 0.7;
+  cursor: pointer;
+  padding: 0;
 }
+.status-banner-close:hover { opacity: 1; }
+.status-banner-close svg { width: 14px; height: 14px; }
 
 .status-badge {
   display: inline-flex;
@@ -1025,12 +1041,13 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 .modal-full {
-  /* Wide enough that the densest items table (Complete Batch: Product +
+  /* Wide enough that the densest items tables (Complete Batch: Product +
      Destination Warehouse + Quantity + Unit Cost + Lot # + Expiry Date +
-     remove, ~950px of column floors) fits without its own horizontal
-     scroll on typical desktop widths. */
-  width: min(1080px, calc(100vw - 48px));
-  max-width: 1180px;
+     remove; Sale Order/Invoice: Product + Price Level + Quantity + Unit
+     Price + Discount % + Subtotal + remove) fit without their own
+     horizontal scroll on typical desktop widths. */
+  width: min(1320px, calc(100vw - 48px));
+  max-width: 1420px;
 }
 
 .modal-header {
@@ -1208,6 +1225,12 @@ tbody tr:last-child td { border-bottom: none; }
   cursor: pointer;
   font-size: 13px;
   transition: background 160ms ease;
+}
+.picker-list-item input[type="checkbox"] {
+  width: 14px;
+  height: 14px;
+  flex-shrink: 0;
+  margin: 0;
 }
 .picker-list-item:last-child { border-bottom: none; }
 .picker-list-item:hover { background: var(--md-surface-soft); }

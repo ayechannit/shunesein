@@ -2,7 +2,7 @@ const db = require('../config/db');
 const logAction = require('../utils/auditLogger');
 const recordStockTransaction = require('../utils/stockLogger');
 const HttpError = require('../utils/HttpError');
-const { postInventoryVarianceEntry } = require('../utils/journalPoster');
+const { postInventoryVarianceEntry, reverseJournalEntries } = require('../utils/journalPoster');
 const { todayUtcIsoDate } = require('../utils/dateUtils');
 
 const ALLOWED_SORT = {
@@ -120,6 +120,77 @@ class InventoryController {
       if (error instanceof HttpError) {
         return res.status(error.statusCode).json({ error: error.message });
       }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Update Production Batch - only while still 'pending' (before raw
+  // materials are deducted at in_progress), same convention as Sale/Purchase
+  // Orders. No stock/GL reversal needed since nothing has been applied yet.
+  updateBatch = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { batch_number, remark, raw_materials } = req.body;
+
+      if (!raw_materials || raw_materials.length === 0) {
+        return res.status(400).json({ error: 'At least one raw material is required' });
+      }
+
+      const existing = await db.query('SELECT * FROM production_batches WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Production batch not found' });
+      }
+      if (existing.rows[0].status !== 'pending') {
+        return res.status(400).json({ error: 'Only pending batches can be edited' });
+      }
+
+      const batch = await db.withTransaction(async (client) => {
+        await validateProductTypes(client, raw_materials.map((item) => item.product_id), 'Raw Material');
+
+        const updateResult = await client.query(
+          'UPDATE production_batches SET batch_number = $1, remark = $2 WHERE id = $3 RETURNING *',
+          [batch_number, remark, id]
+        );
+        const updated = updateResult.rows[0];
+
+        await client.query('DELETE FROM production_raw_materials WHERE batch_id = $1', [id]);
+        for (const item of raw_materials) {
+          await client.query(
+            'INSERT INTO production_raw_materials (batch_id, product_id, quantity, warehouse_id, unit_cost) VALUES ($1, $2, $3, $4, $5)',
+            [id, item.product_id, item.quantity, item.warehouse_id, item.unit_cost || null]
+          );
+        }
+
+        await logAction(req.user.id, 'UPDATE', 'production_batches', id, existing.rows[0], updated, client);
+        return updated;
+      });
+
+      res.json({ message: 'Production batch updated successfully', data: batch });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Delete Production Batch - only while still 'pending'.
+  deleteBatch = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const existing = await db.query('SELECT * FROM production_batches WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Production batch not found' });
+      }
+      if (existing.rows[0].status !== 'pending') {
+        return res.status(400).json({ error: 'Only pending batches can be deleted' });
+      }
+
+      await db.query('DELETE FROM production_batches WHERE id = $1', [id]);
+      await logAction(req.user.id, 'DELETE', 'production_batches', id, existing.rows[0], null);
+
+      res.json({ message: 'Production batch deleted successfully' });
+    } catch (error) {
       res.status(500).json({ error: error.message });
     }
   };
@@ -319,6 +390,72 @@ class InventoryController {
     } catch (error) { res.status(500).json({ error: error.message }); }
   };
 
+  // Update Stock Transfer - only while still 'pending' or 'approved' (before
+  // stock leaves the source warehouse at 'received'). No stock reversal
+  // needed since nothing has moved yet.
+  updateTransfer = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { transfer_number, from_warehouse_id, to_warehouse_id, date, remark, items } = req.body;
+
+      if (from_warehouse_id === to_warehouse_id) {
+        return res.status(400).json({ error: 'Source and destination warehouse must be different' });
+      }
+      if (!items || items.length === 0) {
+        return res.status(400).json({ error: 'At least one item is required' });
+      }
+
+      const existing = await db.query('SELECT * FROM stock_transfers WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Stock transfer not found' });
+      }
+      if (!['pending', 'approved'].includes(existing.rows[0].status)) {
+        return res.status(400).json({ error: 'Only pending or approved transfers can be edited' });
+      }
+
+      const transfer = await db.withTransaction(async (client) => {
+        const updateResult = await client.query(
+          'UPDATE stock_transfers SET transfer_number = $1, from_warehouse_id = $2, to_warehouse_id = $3, date = $4, remark = $5 WHERE id = $6 RETURNING *',
+          [transfer_number, from_warehouse_id, to_warehouse_id, date, remark, id]
+        );
+        const updated = updateResult.rows[0];
+
+        await client.query('DELETE FROM stock_transfer_items WHERE transfer_id = $1', [id]);
+        for (const item of items) {
+          await client.query('INSERT INTO stock_transfer_items (transfer_id, product_id, quantity) VALUES ($1, $2, $3)', [id, item.product_id, item.quantity]);
+        }
+
+        await logAction(req.user.id, 'UPDATE', 'stock_transfers', id, existing.rows[0], updated, client);
+        return updated;
+      });
+
+      res.json({ message: 'Stock transfer updated successfully', data: transfer });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Delete Stock Transfer - only while still 'pending' or 'approved'.
+  deleteTransfer = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const existing = await db.query('SELECT * FROM stock_transfers WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Stock transfer not found' });
+      }
+      if (!['pending', 'approved'].includes(existing.rows[0].status)) {
+        return res.status(400).json({ error: 'Only pending or approved transfers can be deleted' });
+      }
+
+      await db.query('DELETE FROM stock_transfers WHERE id = $1', [id]);
+      await logAction(req.user.id, 'DELETE', 'stock_transfers', id, existing.rows[0], null);
+
+      res.json({ message: 'Stock transfer deleted successfully' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
   // Status flow is strictly pending -> approved -> received -> completed.
   // 'received' deducts from the source warehouse (checked against available stock);
   // 'completed' adds to the destination. Any other jump is rejected outright -
@@ -503,6 +640,158 @@ class InventoryController {
       });
 
       res.status(201).json(adjustment);
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Update Stock Adjustment - reverses the old adjustment's stock/GL effect
+  // (blocked if reversing an increase would take stock negative, i.e. it's
+  // already moved on elsewhere), then reapplies the edited version. Mirrors
+  // updateVoucher's "reverse old, reapply new" idiom.
+  updateAdjustment = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { adjustment_number, warehouse_id, date, reason, items } = req.body;
+
+      if (!items || items.length === 0) {
+        return res.status(400).json({ error: 'At least one item is required' });
+      }
+
+      const existing = await db.query('SELECT * FROM stock_adjustments WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Stock adjustment not found' });
+      }
+      if (existing.rows[0].warehouse_id !== warehouse_id) {
+        return res.status(400).json({ error: 'Changing the warehouse on an existing adjustment is not supported - delete and recreate it instead' });
+      }
+
+      const adjustment = await db.withTransaction(async (client) => {
+        const oldItemsResult = await client.query('SELECT product_id, quantity FROM stock_adjustment_items WHERE adjustment_id = $1', [id]);
+
+        // Reverse the old quantities (subtracting the signed value undoes
+        // both increases and decreases uniformly, same as createAdjustment
+        // applies them). Guard only matters for reversing an increase, since
+        // that pulls stock back out and could go negative if it moved on.
+        for (const item of oldItemsResult.rows) {
+          const quantity = Number(item.quantity);
+          if (quantity > 0) {
+            const stockResult = await client.query(
+              'SELECT quantity FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2 FOR UPDATE',
+              [warehouse_id, item.product_id]
+            );
+            const currentQty = Number(stockResult.rows[0]?.quantity || 0);
+            if (currentQty < quantity) {
+              throw new HttpError(400, `Cannot edit: the adjusted stock for product ID ${item.product_id} has already moved (sold, transferred, or adjusted). Reverse those movements before editing.`);
+            }
+          }
+          await client.query('UPDATE stock_levels SET quantity = quantity - $1 WHERE warehouse_id = $2 AND product_id = $3', [quantity, warehouse_id, item.product_id]);
+          await recordStockTransaction(client, item.product_id, warehouse_id, -quantity, 'adjustment_edit_reversal', id);
+        }
+
+        const updateResult = await client.query(
+          'UPDATE stock_adjustments SET adjustment_number = $1, date = $2, reason = $3 WHERE id = $4 RETURNING *',
+          [adjustment_number, date, reason, id]
+        );
+        const updated = updateResult.rows[0];
+
+        await client.query('DELETE FROM stock_adjustment_items WHERE adjustment_id = $1', [id]);
+        let gainValue = 0;
+        let lossValue = 0;
+        for (const item of items) {
+          const quantity = Number(item.quantity);
+
+          if (quantity < 0) {
+            const stockResult = await client.query(
+              'SELECT quantity FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2 FOR UPDATE',
+              [warehouse_id, item.product_id]
+            );
+            const available = Number(stockResult.rows[0]?.quantity || 0);
+            if (available + quantity < 0) {
+              throw new HttpError(400, `Adjustment would take product ID ${item.product_id} negative. Available: ${available}, adjustment: ${quantity}.`);
+            }
+          }
+
+          await client.query('INSERT INTO stock_adjustment_items (adjustment_id, product_id, quantity, type) VALUES ($1, $2, $3, $4)', [id, item.product_id, quantity, item.type]);
+          await client.query(
+            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+            [warehouse_id, item.product_id, quantity]
+          );
+          await recordStockTransaction(client, item.product_id, warehouse_id, quantity, 'adjustment_edit', id);
+
+          const productResult = await client.query('SELECT cost_price FROM products WHERE id = $1', [item.product_id]);
+          const value = Math.abs(quantity) * Number(productResult.rows[0]?.cost_price || 0);
+          if (quantity > 0) gainValue += value; else if (quantity < 0) lossValue += value;
+        }
+
+        await reverseJournalEntries(client, { referenceType: 'stock_adjustment', referenceId: id, date, description: 'Superseded by edit', createdBy: req.user.id });
+        await postInventoryVarianceEntry(client, {
+          date: updated.date,
+          referenceType: 'stock_adjustment',
+          referenceId: id,
+          description: `Stock Adjustment ${updated.adjustment_number} (edited)`,
+          createdBy: req.user.id,
+          valueIn: gainValue,
+          valueOut: lossValue,
+        });
+
+        await logAction(req.user.id, 'UPDATE', 'stock_adjustments', id, existing.rows[0], updated, client);
+        return updated;
+      });
+
+      res.json({ message: 'Stock adjustment updated successfully', data: adjustment });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Delete Stock Adjustment - fully reverses it: undoes the stock delta
+  // (blocked if reversing an increase would take stock negative) and
+  // reverses the variance GL entry. Neither existed for this module before.
+  deleteAdjustment = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const adjustment = await db.withTransaction(async (client) => {
+        const existingResult = await client.query('SELECT * FROM stock_adjustments WHERE id = $1 FOR UPDATE', [id]);
+        if (existingResult.rows.length === 0) {
+          throw new HttpError(404, 'Stock adjustment not found');
+        }
+        const adjustmentRecord = existingResult.rows[0];
+
+        const itemsResult = await client.query('SELECT product_id, quantity FROM stock_adjustment_items WHERE adjustment_id = $1', [id]);
+        for (const item of itemsResult.rows) {
+          const quantity = Number(item.quantity);
+          if (quantity > 0) {
+            const stockResult = await client.query(
+              'SELECT quantity FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2 FOR UPDATE',
+              [adjustmentRecord.warehouse_id, item.product_id]
+            );
+            const currentQty = Number(stockResult.rows[0]?.quantity || 0);
+            if (currentQty < quantity) {
+              throw new HttpError(400, `Cannot delete: the adjusted stock for product ID ${item.product_id} has already moved (sold, transferred, or adjusted). Reverse those movements before deleting.`);
+            }
+          }
+        }
+        for (const item of itemsResult.rows) {
+          const quantity = Number(item.quantity);
+          await client.query('UPDATE stock_levels SET quantity = quantity - $1 WHERE warehouse_id = $2 AND product_id = $3', [quantity, adjustmentRecord.warehouse_id, item.product_id]);
+          await recordStockTransaction(client, item.product_id, adjustmentRecord.warehouse_id, -quantity, 'adjustment_reversal', id);
+        }
+
+        await reverseJournalEntries(client, { referenceType: 'stock_adjustment', referenceId: id, description: `Deleted Stock Adjustment ${adjustmentRecord.adjustment_number}`, createdBy: req.user.id });
+
+        await client.query('DELETE FROM stock_adjustments WHERE id = $1', [id]);
+        await logAction(req.user.id, 'DELETE', 'stock_adjustments', id, adjustmentRecord, null, client);
+        return adjustmentRecord;
+      });
+
+      res.json({ message: 'Stock adjustment deleted successfully', data: adjustment });
     } catch (error) {
       if (error instanceof HttpError) {
         return res.status(error.statusCode).json({ error: error.message });

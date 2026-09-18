@@ -33,6 +33,7 @@ import {
   fetchCustomers,
   fetchWarehouses,
   fetchSuggestedPrice,
+  fetchAccessiblePriceLevels,
   createSaleOrder,
   updateSaleOrder,
   deleteSaleOrder,
@@ -45,11 +46,13 @@ import {
   fetchAccounts,
   createPayment,
   fetchPayments,
+  updatePayment,
   deletePayment,
   logPrintAction,
   fetchSalesReturns,
   fetchSalesReturnById,
   createSalesReturn,
+  updateSalesReturn,
   deleteSalesReturn,
 } from '../services/salesService';
 import { fetchPrintPageSetups, toPageSettings } from '../services/printSetupService';
@@ -72,7 +75,7 @@ const emptyOrderForm = () => ({
   salesperson_id: '',
   order_date: today(),
   remark: '',
-  items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }],
+  items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }],
 });
 
 const emptyInvoiceForm = () => ({
@@ -85,7 +88,7 @@ const emptyInvoiceForm = () => ({
   remark: '',
   discount_amount: '0',
   tax_amount: '0',
-  items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }],
+  items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }],
 });
 
 const emptyReturnForm = () => ({
@@ -104,6 +107,8 @@ const emptyReturnForm = () => ({
 // Procurement.jsx for the mirror image of this on the purchasing side.
 const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, products, hasPermission = () => true }) => {
   const canWrite = hasPermission('manage_sales_returns');
+  const canEdit = hasPermission('manage_sales_returns_edit');
+  const canDelete = hasPermission('manage_sales_returns_delete');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -113,6 +118,7 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
   const [listError, setListError] = useState('');
   const [success, setSuccess] = useState('');
   const [formOpen, setFormOpen] = useState(false);
+  const [formMode, setFormMode] = useState('create');
   const [formValues, setFormValues] = useState(emptyReturnForm());
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
@@ -160,9 +166,36 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
   const summaryTotal = (formValues.items || []).reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0);
 
   const openCreate = () => {
+    setFormMode('create');
     setFormValues(emptyReturnForm());
     setFormErrors({});
     setFormOpen(true);
+  };
+
+  const handleEdit = async (row) => {
+    setMenuOpenId(null);
+    try {
+      const full = await fetchSalesReturnById(token, row.id);
+      setFormMode('edit');
+      setFormValues({
+        id: full.id,
+        return_number: full.return_number,
+        customer_id: full.customer_id ? String(full.customer_id) : '',
+        warehouse_id: full.warehouse_id ? String(full.warehouse_id) : '',
+        return_date: full.return_date ? full.return_date.slice(0, 10) : today(),
+        reason: full.reason || '',
+        items: (full.items || []).map((item) => ({
+          product_id: String(item.product_id),
+          quantity: String(item.quantity),
+          unit_price: String(item.unit_price),
+        })),
+      });
+      setFormErrors({});
+      setFormOpen(true);
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load return for editing');
+    }
   };
 
   const submitForm = async () => {
@@ -197,15 +230,20 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
           unit_price: Number(item.unit_price),
         })),
       };
-      await createSalesReturn(token, payload);
-      setSuccess('Sales return recorded.');
+      if (formMode === 'edit') {
+        await updateSalesReturn(token, formValues.id, payload);
+        setSuccess('Sales return updated.');
+      } else {
+        await createSalesReturn(token, payload);
+        setSuccess('Sales return recorded.');
+      }
       setFormOpen(false);
       setFormValues(emptyReturnForm());
       setPage(1);
       await load();
     } catch (error) {
       if (error.status === 401) return onLogout();
-      setFormErrors({ submit: error.message || 'Unable to record return' });
+      setFormErrors({ submit: error.message || 'Unable to save return' });
     } finally {
       setSaving(false);
     }
@@ -254,7 +292,14 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
   const content = (
     <div className="procurement-shell">
       {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Sales', 'Sales Returns']} title="Sales Returns" description="Record customer returns - stock comes back in, and what they owe drops." actions={null} /> : null}
-      {success ? <div className="status-banner status-banner-success status-banner-autodismiss" style={{ marginBottom: '1rem' }}>{success}</div> : null}
+      {success ? (
+        <div className="status-banner status-banner-success" style={{ marginBottom: '1rem' }}>
+          <span>{success}</span>
+          <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => setSuccess('')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      ) : null}
       {listError ? <div className="status-banner status-banner-error" style={{ marginBottom: '1rem' }}>{listError}</div> : null}
 
       <div className="procurement-toolbar">
@@ -282,7 +327,8 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
         renderRowActions={(row) => (
           <div className="dropdown-menu-list">
             <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
-            {canWrite ? <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button> : null}
+            {canEdit ? <button type="button" className="dropdown-menu-item" onClick={() => handleEdit(row)}><PencilIcon className="menu-icon" /><span>Edit</span></button> : null}
+            {canDelete ? <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button> : null}
           </div>
         )}
         menuOpenId={menuOpenId}
@@ -305,13 +351,13 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
       {formOpen ? (
         <MasterModal
           size="wide"
-          title="New Sales Return"
+          title={formMode === 'edit' ? 'Edit Sales Return' : 'New Sales Return'}
           description="Record what the customer sent back."
           onClose={() => setFormOpen(false)}
           footer={(
             <>
               <button type="button" className="master-button master-button-secondary" onClick={() => setFormOpen(false)}>Cancel</button>
-              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save Return'}</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : (formMode === 'edit' ? 'Update Return' : 'Save Return')}</button>
             </>
           )}
         >
@@ -418,6 +464,10 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
 
 const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPermission = () => true }) => {
   const canWrite = hasPermission(defaultTab === 'orders' ? 'manage_sale_orders' : 'manage_sales_invoices');
+  const canEdit = hasPermission(defaultTab === 'orders' ? 'manage_sale_orders_edit' : 'manage_sales_invoices_edit');
+  const canDelete = hasPermission(defaultTab === 'orders' ? 'manage_sale_orders_delete' : 'manage_sales_invoices_delete');
+  const canEditPayments = hasPermission('manage_payments_edit');
+  const canDeletePayments = hasPermission('manage_payments_delete');
   // "Convert to Invoice" on an approved order creates an invoice, a
   // separately-permissioned action from editing the order itself.
   const canCreateInvoices = hasPermission('manage_sales_invoices');
@@ -441,6 +491,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const [customers, setCustomers] = useState([]);
   const [warehouses, setWarehouses] = useState([]);
   const [salespeople, setSalespeople] = useState([]);
+  const [priceLevels, setPriceLevels] = useState([]);
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState('create');
   const [formType, setFormType] = useState(defaultTab);
@@ -468,6 +519,10 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const [paymentDeleteTarget, setPaymentDeleteTarget] = useState(null);
   const [paymentDeleteError, setPaymentDeleteError] = useState('');
   const [paymentDeleteLoading, setPaymentDeleteLoading] = useState(false);
+  const [paymentEditTarget, setPaymentEditTarget] = useState(null);
+  const [paymentEditForm, setPaymentEditForm] = useState(null);
+  const [paymentEditLoading, setPaymentEditLoading] = useState(false);
+  const [paymentEditError, setPaymentEditError] = useState('');
   const menuRef = useRef(null);
 
   useEffect(() => {
@@ -503,16 +558,18 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
 
   const loadLookups = async () => {
     try {
-      const [productData, customerData, warehouseData, userData] = await Promise.all([
+      const [productData, customerData, warehouseData, userData, priceLevelData] = await Promise.all([
         fetchProducts(token),
         fetchCustomers(token),
         fetchWarehouses(token),
         fetchUsersForFilter(token),
+        fetchAccessiblePriceLevels(token),
       ]);
       setProducts(productData);
       setCustomers(customerData);
       setWarehouses(warehouseData);
       setSalespeople(userData);
+      setPriceLevels(priceLevelData);
     } catch {
       // ignore lookup errors for now
     }
@@ -582,18 +639,6 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [token, invoicesPage, invoicesPageSize, invoicesSearch, invoicesSort, defaultTab]);
 
-  // Auto-dismiss success confirmations after a few seconds; errors stay until the user acts.
-  useEffect(() => {
-    if (!success) return;
-    const timer = setTimeout(() => setSuccess(''), 3000);
-    return () => clearTimeout(timer);
-  }, [success]);
-
-  useEffect(() => {
-    if (!paymentSuccess) return;
-    const timer = setTimeout(() => setPaymentSuccess(''), 3000);
-    return () => clearTimeout(timer);
-  }, [paymentSuccess]);
 
   const handleCreateOrder = () => {
     setFormType('orders');
@@ -617,13 +662,15 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     setFormValues((previous) => ({ ...previous, items: nextItems }));
   };
 
-  // Quantity-tier pricing (see PricingController/product_price_tiers): the
-  // right price for a line depends on both which product and how many, so
-  // this re-suggests whenever either one changes, not just on product pick.
-  const applySuggestedPrice = async (index, productId, quantity) => {
+  // Price Level pricing (see PricingController/product_price_by_level) is
+  // chosen per line, since different items on the same document can come
+  // from different price lists. If a line has a price level selected and the
+  // product has a price set for it, that price wins; otherwise falls back to
+  // the product's flat selling price - see pricingEngine.resolvePrice.
+  const applySuggestedPrice = async (index, productId, priceLevelId) => {
     if (!productId) return;
     try {
-      const unitPrice = await fetchSuggestedPrice(token, { product_id: productId, quantity: quantity || 1 });
+      const unitPrice = await fetchSuggestedPrice(token, { product_id: productId, price_level_id: priceLevelId || undefined });
       setFormValues((previous) => {
         const nextItems = [...previous.items];
         if (!nextItems[index] || nextItems[index].product_id !== productId) return previous;
@@ -637,16 +684,16 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
 
   const handleItemProductChange = (index, productId) => {
     updateItem(index, 'product_id', productId);
-    applySuggestedPrice(index, productId, formValues.items[index]?.quantity);
+    applySuggestedPrice(index, productId, formValues.items[index]?.price_level_id);
   };
 
-  const handleItemQuantityChange = (index, quantity) => {
-    updateItem(index, 'quantity', quantity);
-    applySuggestedPrice(index, formValues.items[index]?.product_id, quantity);
+  const handleItemPriceLevelChange = (index, priceLevelId) => {
+    updateItem(index, 'price_level_id', priceLevelId);
+    applySuggestedPrice(index, formValues.items[index]?.product_id, priceLevelId);
   };
 
   const addItem = () => {
-    setFormValues((previous) => ({ ...previous, items: [...previous.items, { product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }] }));
+    setFormValues((previous) => ({ ...previous, items: [...previous.items, { product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }] }));
   };
 
   const removeItem = (index) => {
@@ -783,7 +830,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         salesperson_id: String(row.salesperson_id || ''),
         order_date: row.order_date ? String(row.order_date).slice(0, 10) : '',
         remark: row.remark || '',
-        items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }],
+        items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }],
       });
       fetchSaleOrderById(token, row.id)
         .then((data) => {
@@ -795,6 +842,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                 quantity: String(item.quantity),
                 unit_price: String(item.unit_price),
                 discount_percent: String(item.discount_percent || '0'),
+                price_level_id: '',
               })),
             }));
           }
@@ -812,7 +860,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         remark: row.remark || '',
         discount_amount: String(row.discount_amount || '0'),
         tax_amount: String(row.tax_amount || '0'),
-        items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0' }],
+        items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }],
       });
       fetchSalesInvoiceById(token, row.id)
         .then((data) => {
@@ -824,6 +872,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                 quantity: String(item.quantity),
                 unit_price: String(item.unit_price),
                 discount_percent: String(item.discount_percent || '0'),
+                price_level_id: '',
               })),
             }));
           }
@@ -1124,7 +1173,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
 
     return (
       <MasterModal
-        size="wide"
+        size="full"
         title={formMode === 'edit' ? `Edit ${isOrder ? 'Sale Order' : 'Sales Invoice'}` : (isOrder ? 'New Sale Order' : 'New Sales Invoice')}
         description={formMode === 'edit' ? `Update the ${isOrder ? 'sale order' : 'sales invoice'} details.` : (isOrder ? 'Create a sale order and assign items.' : 'Create a sales invoice and ship inventory.')}
         onClose={closeFormModal}
@@ -1172,6 +1221,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
               <thead>
                 <tr>
                   <th>Product</th>
+                  <th>Price Level</th>
                   <th>Quantity</th>
                   <th>Unit Price</th>
                   <th>Discount %</th>
@@ -1195,11 +1245,17 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                         />
                         {product ? <div className="field-hint">{product.name}</div> : null}
                       </td>
+                      <td data-label="Price Level" style={{ minWidth: '160px' }}>
+                        <select style={{ width: '100%' }} value={item.price_level_id || ''} onChange={(event) => handleItemPriceLevelChange(index, event.target.value)}>
+                          <option value="">Default</option>
+                          {priceLevels.map((level) => <option key={level.id} value={level.id}>{level.name}</option>)}
+                        </select>
+                      </td>
                       <td data-label="Quantity">
-                        <input type="number" min="1" value={item.quantity || ''} onChange={(event) => handleItemQuantityChange(index, event.target.value)} />
+                        <input type="number" min="1" value={item.quantity || ''} onChange={(event) => updateItem(index, 'quantity', event.target.value)} />
                       </td>
                       <td data-label="Unit Price">
-                        <input type="number" min="1" step="0.01" value={item.unit_price || ''} onChange={(event) => updateItem(index, 'unit_price', event.target.value)} />
+                        <input type="number" min="1" step="0.01" value={item.unit_price || ''} disabled title="Set by the selected price level (or the product's default price)" />
                       </td>
                       <td data-label="Discount %">
                         <input type="number" min="0" max="100" step="0.01" value={item.discount_percent || '0'} onChange={(event) => updateItem(index, 'discount_percent', event.target.value)} />
@@ -1351,6 +1407,56 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     const handleDeletePaymentRequest = (payment) => {
       setPaymentDeleteTarget(payment);
       setPaymentDeleteError('');
+    };
+
+    const handleEditPaymentRequest = (payment) => {
+      setPaymentEditTarget(payment);
+      setPaymentEditForm({
+        payment_method_id: payment.payment_method_id ? String(payment.payment_method_id) : '',
+        amount: String(payment.amount),
+        payment_date: payment.payment_date ? String(payment.payment_date).slice(0, 10) : today(),
+        reference_no: payment.reference_no || '',
+        bank_name: payment.bank_name || '',
+        note: payment.note || '',
+        account_id: payment.account_id ? String(payment.account_id) : '',
+      });
+      setPaymentEditError('');
+    };
+
+    const handleEditPaymentSave = async () => {
+      if (!paymentEditTarget || !paymentEditForm) return;
+      if (!paymentEditForm.payment_method_id || !paymentEditForm.amount) {
+        setPaymentEditError('Payment method and amount are required.');
+        return;
+      }
+      setPaymentEditLoading(true);
+      setPaymentEditError('');
+      try {
+        await updatePayment(token, paymentEditTarget.id, {
+          payment_method_id: Number(paymentEditForm.payment_method_id),
+          amount: Number(paymentEditForm.amount),
+          payment_date: paymentEditForm.payment_date,
+          reference_no: paymentEditForm.reference_no,
+          bank_name: paymentEditForm.bank_name,
+          note: paymentEditForm.note,
+          account_id: paymentEditForm.account_id ? Number(paymentEditForm.account_id) : undefined,
+        });
+        setPaymentEditTarget(null);
+        setPaymentEditForm(null);
+        setPaymentSuccess('Payment updated.');
+        await loadInvoicePayments(viewRecord.id);
+        const updated = await fetchSalesInvoiceById(token, viewRecord.id);
+        setViewRecord(updated);
+        await loadInvoices();
+      } catch (error) {
+        if (error.status === 401) {
+          onLogout();
+          return;
+        }
+        setPaymentEditError(error.message || 'Unable to update payment.');
+      } finally {
+        setPaymentEditLoading(false);
+      }
     };
 
     const handleDeletePaymentConfirm = async () => {
@@ -1529,9 +1635,16 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                           <td>{formatNumber(payment.amount)}</td>
                           <td>{payment.reference_no || '-'}</td>
                           <td>
-                            <button type="button" className="item-remove-btn" title="Delete payment" onClick={() => handleDeletePaymentRequest(payment)}>
-                              <TrashIcon />
-                            </button>
+                            {canEditPayments ? (
+                              <button type="button" className="item-remove-btn" title="Edit payment" onClick={() => handleEditPaymentRequest(payment)}>
+                                <PencilIcon />
+                              </button>
+                            ) : null}
+                            {canDeletePayments ? (
+                              <button type="button" className="item-remove-btn" title="Delete payment" onClick={() => handleDeletePaymentRequest(payment)}>
+                                <TrashIcon />
+                              </button>
+                            ) : null}
                           </td>
                         </tr>
                       ))}
@@ -1545,7 +1658,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                   <div className="payment-form-card">
                     <h4 className="payment-form-header">Record customer receipt</h4>
                     {paymentError ? <div className="status-banner status-banner-error">{paymentError}</div> : null}
-                    {paymentSuccess ? <div className="status-banner status-banner-success status-banner-autodismiss">{paymentSuccess}</div> : null}
+                    {paymentSuccess ? (
+                      <div className="status-banner status-banner-success">
+                        <span>{paymentSuccess}</span>
+                        <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => setPaymentSuccess('')}>
+                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                        </button>
+                      </div>
+                    ) : null}
                     <div className="procurement-grid">
                       <div className="form-field">
                         <label>Payment Method *</label>
@@ -1614,6 +1734,58 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           error={paymentDeleteError}
         />
       ) : null}
+
+      {paymentEditTarget && paymentEditForm ? (
+        <MasterModal
+          title="Edit Payment"
+          description={`Recorded ${formatDate(paymentEditTarget.payment_date)}`}
+          onClose={() => { setPaymentEditTarget(null); setPaymentEditForm(null); }}
+          footer={(
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={() => { setPaymentEditTarget(null); setPaymentEditForm(null); }}>Cancel</button>
+              <button type="button" className="master-button master-button-primary" onClick={handleEditPaymentSave} disabled={paymentEditLoading}>{paymentEditLoading ? 'Saving...' : 'Save'}</button>
+            </>
+          )}
+        >
+          {paymentEditError ? <div className="status-banner status-banner-error">{paymentEditError}</div> : null}
+          <div className="procurement-grid">
+            <div className="form-field">
+              <label>Payment Method *</label>
+              <select value={paymentEditForm.payment_method_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
+                <option value="">Select method</option>
+                {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
+              </select>
+            </div>
+            <div className="form-field">
+              <label>Amount *</label>
+              <input type="number" min="0.01" step="0.01" value={paymentEditForm.amount} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="0.00" />
+            </div>
+            <div className="form-field">
+              <label>Payment Date</label>
+              <input type="date" value={paymentEditForm.payment_date} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, payment_date: e.target.value }))} />
+            </div>
+            <div className="form-field">
+              <label>Account</label>
+              <select value={paymentEditForm.account_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, account_id: e.target.value }))}>
+                <option value="">Select account</option>
+                {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+              </select>
+            </div>
+            <div className="form-field">
+              <label>Reference No</label>
+              <input type="text" value={paymentEditForm.reference_no} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, reference_no: e.target.value }))} placeholder="e.g. CHECK-001" />
+            </div>
+            <div className="form-field">
+              <label>Bank Name</label>
+              <input type="text" value={paymentEditForm.bank_name} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, bank_name: e.target.value }))} placeholder="e.g. KBZ Bank" />
+            </div>
+            <div className="form-field form-field-full">
+              <label>Note</label>
+              <input type="text" value={paymentEditForm.note} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, note: e.target.value }))} placeholder="Optional note" />
+            </div>
+          </div>
+        </MasterModal>
+      ) : null}
       </>
     );
   };
@@ -1631,14 +1803,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           <span>View</span>
         </button>
 
-        {canWrite && isPending && (
+        {canEdit && isPending && (
           <button type="button" className="dropdown-menu-item" onClick={() => handleAction('edit', row)}>
             <PencilIcon className="menu-icon" />
             <span>Edit</span>
           </button>
         )}
 
-        {canWrite && isPending && (
+        {canEdit && isPending && (
           <button type="button" className="dropdown-menu-item" onClick={() => handleAction('approve', row)}>
             <CheckIcon className="menu-icon" />
             <span>Approve</span>
@@ -1665,14 +1837,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           </button>
         )}
 
-        {canWrite && isPending && (
+        {canDelete && isPending && (
           <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
             <TrashIcon className="menu-icon" />
             <span>Delete</span>
           </button>
         )}
 
-        {canWrite && isPending && (
+        {canEdit && isPending && (
           <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('cancel', row)}>
             <XCircleIcon className="menu-icon" />
             <span>Cancel</span>
@@ -1682,28 +1854,37 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     );
   };
 
-  const renderInvoiceActions = (row) => (
-    <div className="dropdown-menu-list">
-      <button type="button" className="dropdown-menu-item" onClick={() => handleAction('view', row)}>
-        <EyeIcon className="menu-icon" />
-        <span>View</span>
-      </button>
-      <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print', row)}>
-        <PrinterIcon className="menu-icon" />
-        <span>Print</span>
-      </button>
-      <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print-with-setup', row)}>
-        <PrinterIcon className="menu-icon" />
-        <span>Print with Page Setup...</span>
-      </button>
-      {canWrite ? (
-        <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
-          <TrashIcon className="menu-icon" />
-          <span>Delete</span>
+  const renderInvoiceActions = (row) => {
+    const isUnpaid = (row.payment_status || 'unpaid') === 'unpaid';
+    return (
+      <div className="dropdown-menu-list">
+        <button type="button" className="dropdown-menu-item" onClick={() => handleAction('view', row)}>
+          <EyeIcon className="menu-icon" />
+          <span>View</span>
         </button>
-      ) : null}
-    </div>
-  );
+        {canEdit && isUnpaid ? (
+          <button type="button" className="dropdown-menu-item" onClick={() => handleAction('edit', row)}>
+            <PencilIcon className="menu-icon" />
+            <span>Edit</span>
+          </button>
+        ) : null}
+        <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print', row)}>
+          <PrinterIcon className="menu-icon" />
+          <span>Print</span>
+        </button>
+        <button type="button" className="dropdown-menu-item" onClick={() => handleAction('print-with-setup', row)}>
+          <PrinterIcon className="menu-icon" />
+          <span>Print with Page Setup...</span>
+        </button>
+        {canDelete ? (
+          <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
+            <TrashIcon className="menu-icon" />
+            <span>Delete</span>
+          </button>
+        ) : null}
+      </div>
+    );
+  };
 
   const renderList = (listType) => {
     const list = listType === 'orders' ? orders : invoices;
@@ -1805,7 +1986,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     <>
       {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Sales', defaultTab === 'orders' ? 'Sale Orders' : 'Sales Invoices']} title={defaultTab === 'orders' ? 'Sale Orders' : 'Sales Invoices'} description={defaultTab === 'orders' ? 'Manage sale orders and customer assignments.' : 'Manage sales invoices and customer receipts.'} actions={null} /> : null}
 
-      {success ? <div className="status-banner status-banner-success status-banner-autodismiss" style={{ marginBottom: '1rem' }}>{success}</div> : null}
+      {success ? (
+        <div className="status-banner status-banner-success" style={{ marginBottom: '1rem' }}>
+          <span>{success}</span>
+          <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => setSuccess('')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      ) : null}
       {error ? <div className="status-banner status-banner-error" style={{ marginBottom: '1rem' }}>{error}</div> : null}
 
       {renderList(defaultTab)}

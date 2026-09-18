@@ -30,30 +30,32 @@ export const MODULE_PERMISSIONS = {
 
   categories: { write: 'manage_categories' },
   products: { write: 'manage_products' },
-  'pricing-tiers': { write: 'manage_price_lists' },
+  'price-levels': { write: 'manage_price_levels' },
+  'price-level-pricing': { write: 'manage_price_levels' },
   suppliers: { write: 'manage_suppliers' },
   customers: { write: 'manage_customers' },
   warehouses: { write: 'manage_warehouses' },
   accounts: { write: 'manage_accounts' },
   'payment-methods': { write: 'manage_payment_methods' },
 
-  'purchase-orders': { write: 'manage_purchase_orders' },
-  'purchase-vouchers': { write: 'manage_purchase_vouchers' },
-  'purchase-returns': { write: 'manage_purchase_returns' },
+  'purchase-orders': { write: 'manage_purchase_orders', edit: 'manage_purchase_orders_edit', delete: 'manage_purchase_orders_delete' },
+  'purchase-vouchers': { write: 'manage_purchase_vouchers', edit: 'manage_purchase_vouchers_edit', delete: 'manage_purchase_vouchers_delete' },
+  'purchase-returns': { write: 'manage_purchase_returns', edit: 'manage_purchase_returns_edit', delete: 'manage_purchase_returns_delete' },
 
-  'sale-orders': { write: 'manage_sale_orders' },
-  'sales-invoices': { write: 'manage_sales_invoices' },
-  'sales-returns': { write: 'manage_sales_returns' },
+  'sale-orders': { write: 'manage_sale_orders', edit: 'manage_sale_orders_edit', delete: 'manage_sale_orders_delete' },
+  'sales-invoices': { write: 'manage_sales_invoices', edit: 'manage_sales_invoices_edit', delete: 'manage_sales_invoices_delete' },
+  'sales-returns': { write: 'manage_sales_returns', edit: 'manage_sales_returns_edit', delete: 'manage_sales_returns_delete' },
 
-  delivery: { write: 'manage_delivery' },
-  'production-batches': { write: 'manage_production' },
-  'stock-transfers': { write: 'manage_stock' },
-  'stock-adjustments': { write: 'manage_stock' },
+  delivery: { write: 'manage_delivery', edit: 'manage_delivery_edit', delete: 'manage_delivery_delete' },
+  'production-batches': { write: 'manage_production', edit: 'manage_production_edit', delete: 'manage_production_delete' },
+  'stock-transfers': { write: 'manage_stock', edit: 'manage_stock_edit', delete: 'manage_stock_delete' },
+  'stock-adjustments': { write: 'manage_stock', edit: 'manage_stock_edit', delete: 'manage_stock_delete' },
   'stock-count': { write: 'manage_stock' },
 
+  payments: { write: 'manage_payments', edit: 'manage_payments_edit', delete: 'manage_payments_delete' },
   'income-expense-categories': { write: 'manage_finance_categories' },
-  'finance-entries': { write: 'manage_finance_entries' },
-  'finance-transfers': { write: 'manage_finance_transfers' },
+  'finance-entries': { write: 'manage_finance_entries', edit: 'manage_finance_entries_edit', delete: 'manage_finance_entries_delete' },
+  'finance-transfers': { write: 'manage_finance_transfers', edit: 'manage_finance_transfers_edit', delete: 'manage_finance_transfers_delete' },
   'finance-ledger': {},
 
   'report-current-stock': { view: 'view_report_current_stock' },
@@ -117,4 +119,20 @@ export const canWriteModule = (moduleKey, hasPermission) => {
   const entry = MODULE_PERMISSIONS[moduleKey];
   if (!entry || !entry.write) return true;
   return hasPermission(entry.write);
+};
+
+// True if this module has its edit/delete permissions split out from create
+// (transaction modules only, see migration 023). Falls back to canWriteModule
+// for every other module, which still uses one write permission for
+// create/edit/delete together.
+export const canEditModule = (moduleKey, hasPermission) => {
+  const entry = MODULE_PERMISSIONS[moduleKey];
+  if (!entry || !entry.edit) return canWriteModule(moduleKey, hasPermission);
+  return hasPermission(entry.edit);
+};
+
+export const canDeleteModule = (moduleKey, hasPermission) => {
+  const entry = MODULE_PERMISSIONS[moduleKey];
+  if (!entry || !entry.delete) return canWriteModule(moduleKey, hasPermission);
+  return hasPermission(entry.delete);
 };

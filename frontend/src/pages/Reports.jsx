@@ -146,7 +146,7 @@ const CurrentStockReport = ({ token, onLogout, warehouses }) => {
           <SearchableSelect
             value={warehouseId}
             onChange={(v) => { setWarehouseId(v); load(v); }}
-            options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))}
+            options={[{ value: '', label: 'All Warehouses' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))]}
             placeholder="All warehouses"
           />
         </div>
@@ -159,6 +159,7 @@ const CurrentStockReport = ({ token, onLogout, warehouses }) => {
             { key: 'product_code', label: 'Code' },
             { key: 'warehouse_name', label: 'Warehouse' },
             { key: 'quantity', label: 'Quantity' },
+            { key: 'unit', label: 'Unit' },
             { key: 'cost_price', label: 'Cost Price' },
             { key: 'stock_value', label: 'Stock Value' },
           ]}
@@ -172,7 +173,7 @@ const CurrentStockReport = ({ token, onLogout, warehouses }) => {
         ) : null}
         {items.length === 0 ? <div className="payment-history-empty">No stock recorded.</div> : (
           <table className="procurement-items-table">
-            <thead><tr><th>Product</th><th>Code</th><th>Warehouse</th><th>Quantity</th><th>Cost Price</th><th>Stock Value</th></tr></thead>
+            <thead><tr><th>Product</th><th>Code</th><th>Warehouse</th><th>Quantity</th><th>Unit</th><th>Cost Price</th><th>Stock Value</th></tr></thead>
             <tbody>
               {items.map((row, index) => (
                 <tr key={index}>
@@ -180,11 +181,18 @@ const CurrentStockReport = ({ token, onLogout, warehouses }) => {
                   <td data-label="Code">{row.product_code || '-'}</td>
                   <td data-label="Warehouse">{row.warehouse_name}</td>
                   <td data-label="Quantity">{formatNumber(row.quantity)}</td>
+                  <td data-label="Unit">{row.unit || '-'}</td>
                   <td data-label="Cost Price">{formatNumber(row.cost_price)}</td>
                   <td data-label="Stock Value" className="item-subtotal">{formatNumber(row.stock_value)}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={6} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                <td style={{ fontWeight: 600 }}>{formatNumber(data?.total_value)}</td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </ReportShell>
@@ -225,8 +233,10 @@ const LowStockReport = ({ token, onLogout }) => {
           rows={items}
           columns={[
             { key: 'product_name', label: 'Product' },
+            { key: 'product_code', label: 'Product Code' },
             { key: 'warehouse_name', label: 'Warehouse' },
             { key: 'quantity', label: 'On Hand' },
+            { key: 'unit', label: 'Unit' },
             { key: 'min_stock_level', label: 'Min. Level' },
             { key: 'shortfall', label: 'Shortfall' },
             { key: 'reorder_value', label: 'Reorder Value' },
@@ -241,19 +251,27 @@ const LowStockReport = ({ token, onLogout }) => {
         ) : null}
         {items.length === 0 ? <div className="payment-history-empty">Nothing is low on stock.</div> : (
           <table className="procurement-items-table">
-            <thead><tr><th>Product</th><th>Warehouse</th><th>On Hand</th><th>Min. Level</th><th>Shortfall</th><th>Reorder Value</th></tr></thead>
+            <thead><tr><th>Product</th><th>Product Code</th><th>Warehouse</th><th>On Hand</th><th>Unit</th><th>Min. Level</th><th>Shortfall</th><th>Reorder Value</th></tr></thead>
             <tbody>
               {items.map((row, index) => (
                 <tr key={index}>
                   <td data-label="Product">{row.product_name}</td>
+                  <td data-label="Product Code">{row.product_code || '-'}</td>
                   <td data-label="Warehouse">{row.warehouse_name}</td>
                   <td data-label="On Hand">{formatNumber(row.quantity)}</td>
+                  <td data-label="Unit">{row.unit || '-'}</td>
                   <td data-label="Min. Level">{formatNumber(row.min_stock_level)}</td>
                   <td data-label="Shortfall" style={{ color: 'var(--md-danger)', fontWeight: 600 }}>{formatNumber(row.shortfall)}</td>
                   <td data-label="Reorder Value">{formatNumber(row.reorder_value)}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={7} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                <td style={{ fontWeight: 600 }}>{formatNumber(data?.total_reorder_value)}</td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </ReportShell>
@@ -298,9 +316,9 @@ const StockMovementReport = ({ token, onLogout, products, warehouses }) => {
 
   useEffect(() => { load(1); }, [token]);
 
-  const typeOptions = useMemo(() => MOVEMENT_TYPES.map((t) => ({ value: t, label: t.replace(/_/g, ' ') })), []);
-  const productOptions = useMemo(() => products.map((p) => ({ value: String(p.id), label: p.name })), [products]);
-  const warehouseOptions = useMemo(() => warehouses.map((w) => ({ value: String(w.id), label: w.name })), [warehouses]);
+  const typeOptions = useMemo(() => [{ value: '', label: 'All Types' }, ...MOVEMENT_TYPES.map((t) => ({ value: t, label: t.replace(/_/g, ' ') }))], []);
+  const productOptions = useMemo(() => [{ value: '', label: 'All Products' }, ...products.map((p) => ({ value: String(p.id), label: p.name }))], [products]);
+  const warehouseOptions = useMemo(() => [{ value: '', label: 'All Warehouses' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))], [warehouses]);
 
   return (
     <>
@@ -330,9 +348,11 @@ const StockMovementReport = ({ token, onLogout, products, warehouses }) => {
               columns={[
                 { key: 'created_at', label: 'Date', value: (row) => formatDateTime(row.created_at) },
                 { key: 'product_name', label: 'Product' },
+                { key: 'product_code', label: 'Product Code' },
                 { key: 'warehouse_name', label: 'Warehouse' },
                 { key: 'transaction_type', label: 'Type' },
                 { key: 'quantity_change', label: 'Qty Change' },
+                { key: 'unit', label: 'Unit' },
                 { key: 'value_change', label: 'Value Change' },
                 { key: 'reference_number', label: 'Reference', value: (row) => row.reference_number || `#${row.reference_id}` },
               ]}
@@ -344,17 +364,19 @@ const StockMovementReport = ({ token, onLogout, products, warehouses }) => {
         {rows.length === 0 ? <div className="payment-history-empty">No stock transactions in this range.</div> : (
           <>
             <table className="procurement-items-table">
-              <thead><tr><th>Date</th><th>Product</th><th>Warehouse</th><th>Type</th><th>Qty Change</th><th>Value Change</th><th>Reference</th></tr></thead>
+              <thead><tr><th>Date</th><th>Product</th><th>Code</th><th>Warehouse</th><th>Type</th><th>Qty Change</th><th>Unit</th><th>Value Change</th><th>Reference</th></tr></thead>
               <tbody>
                 {rows.map((row) => (
                   <tr key={row.id}>
                     <td data-label="Date">{formatDateTime(row.created_at)}</td>
                     <td data-label="Product">{row.product_name}</td>
+                    <td data-label="Code">{row.product_code || '-'}</td>
                     <td data-label="Warehouse">{row.warehouse_name}</td>
                     <td data-label="Type">{row.transaction_type.replace(/_/g, ' ')}</td>
                     <td data-label="Qty Change" style={{ color: Number(row.quantity_change) >= 0 ? 'var(--md-success)' : 'var(--md-danger)', fontWeight: 600 }}>
                       {Number(row.quantity_change) >= 0 ? '+' : ''}{formatNumber(row.quantity_change)}
                     </td>
+                    <td data-label="Unit">{row.unit || '-'}</td>
                     <td data-label="Value Change" style={{ color: Number(row.value_change) >= 0 ? 'var(--md-success)' : 'var(--md-danger)' }}>
                       {Number(row.value_change) >= 0 ? '+' : ''}{formatNumber(row.value_change)}
                     </td>
@@ -391,15 +413,10 @@ const StockLedgerReport = ({ token, onLogout, products, warehouses }) => {
   const [error, setError] = useState('');
 
   const load = async () => {
-    if (!productId || !warehouseId) {
-      setError('Select a product and a warehouse to view its ledger.');
-      setLedger(null);
-      return;
-    }
     setLoading(true);
     setError('');
     try {
-      const data = await fetchStockLedger(token, { product_id: productId, warehouse_id: warehouseId, from, to });
+      const data = await fetchStockLedger(token, { product_id: productId || undefined, warehouse_id: warehouseId || undefined, from, to });
       setLedger(data);
     } catch (err) {
       if (err.status === 401) return onLogout();
@@ -409,8 +426,10 @@ const StockLedgerReport = ({ token, onLogout, products, warehouses }) => {
     }
   };
 
-  const productOptions = useMemo(() => products.map((p) => ({ value: String(p.id), label: p.name })), [products]);
-  const warehouseOptions = useMemo(() => warehouses.map((w) => ({ value: String(w.id), label: w.name })), [warehouses]);
+  useEffect(() => { load(); }, [token]);
+
+  const productOptions = useMemo(() => [{ value: '', label: 'All Products' }, ...products.map((p) => ({ value: String(p.id), label: p.name }))], [products]);
+  const warehouseOptions = useMemo(() => [{ value: '', label: 'All Warehouses' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))], [warehouses]);
 
   return (
     <>
@@ -423,55 +442,63 @@ const StockLedgerReport = ({ token, onLogout, products, warehouses }) => {
         extra={(
           <>
             <div className="form-field report-filter-field">
-              <label>Product *</label>
-              <SearchableSelect value={productId} onChange={setProductId} options={productOptions} placeholder="Select product" />
+              <label>Product</label>
+              <SearchableSelect value={productId} onChange={setProductId} options={productOptions} placeholder="All products" />
             </div>
             <div className="form-field report-filter-field">
-              <label>Warehouse *</label>
-              <SearchableSelect value={warehouseId} onChange={setWarehouseId} options={warehouseOptions} placeholder="Select warehouse" />
+              <label>Warehouse</label>
+              <SearchableSelect value={warehouseId} onChange={setWarehouseId} options={warehouseOptions} placeholder="All warehouses" />
             </div>
           </>
         )}
       />
       <ReportShell loading={loading} error={error}>
-        {!ledger ? (
-          <div className="payment-history-empty">Select a product and a warehouse, then Apply, to view its stock card.</div>
+        {!ledger || ledger.groups.length === 0 ? (
+          <div className="payment-history-empty">No stock transactions in this range.</div>
         ) : (
-          <>
-            <div className="procurement-summary" style={{ marginLeft: 0, marginBottom: '16px' }}>
-              <div className="procurement-summary-row"><span>Opening Balance</span><strong>{formatNumber(ledger.opening_balance)}</strong></div>
-              <div className="procurement-summary-row"><span>Closing Balance</span><strong>{formatNumber(ledger.closing_balance)}</strong></div>
+          ledger.groups.map((group) => (
+            <div key={`${group.product_id}-${group.warehouse_id}`} className="procurement-card" style={{ marginBottom: '20px' }}>
+              <div className="table-headline">
+                <div>
+                  <h2>{group.product_name} {group.product_code ? `(${group.product_code})` : ''} - {group.warehouse_name}</h2>
+                  {group.unit ? <p>Unit: {group.unit}</p> : null}
+                </div>
+                <ExportCsvButton
+                  filename={`stock-ledger-${group.product_id}-${group.warehouse_id}.csv`}
+                  rows={group.entries}
+                  columns={[
+                    { key: 'created_at', label: 'Date', value: (row) => formatDateTime(row.created_at) },
+                    { key: 'transaction_type', label: 'Type' },
+                    { key: 'quantity_change', label: 'Qty Change' },
+                    { key: 'running_balance', label: 'Running Balance' },
+                    { key: 'reference_id', label: 'Reference', value: (row) => `#${row.reference_id}` },
+                  ]}
+                />
+              </div>
+              <div className="procurement-summary" style={{ marginLeft: 0, marginBottom: '16px' }}>
+                <div className="procurement-summary-row"><span>Opening Balance</span><strong>{formatNumber(group.opening_balance)}</strong></div>
+                <div className="procurement-summary-row"><span>Closing Balance</span><strong>{formatNumber(group.closing_balance)}</strong></div>
+              </div>
+              {group.entries.length === 0 ? <div className="payment-history-empty">No transactions in this range.</div> : (
+                <table className="procurement-items-table">
+                  <thead><tr><th>Date</th><th>Type</th><th>Qty Change</th><th>Running Balance</th><th>Reference</th></tr></thead>
+                  <tbody>
+                    {group.entries.map((entry) => (
+                      <tr key={entry.id}>
+                        <td data-label="Date">{formatDateTime(entry.created_at)}</td>
+                        <td data-label="Type">{entry.transaction_type.replace(/_/g, ' ')}</td>
+                        <td data-label="Qty Change" style={{ color: entry.quantity_change >= 0 ? 'var(--md-success)' : 'var(--md-danger)', fontWeight: 600 }}>
+                          {entry.quantity_change >= 0 ? '+' : ''}{formatNumber(entry.quantity_change)}
+                        </td>
+                        <td data-label="Running Balance" className="item-subtotal">{formatNumber(entry.running_balance)}</td>
+                        <td data-label="Reference">#{entry.reference_id}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
             </div>
-            <ExportCsvButton
-              filename="stock-ledger.csv"
-              rows={ledger.entries}
-              columns={[
-                { key: 'created_at', label: 'Date', value: (row) => formatDateTime(row.created_at) },
-                { key: 'transaction_type', label: 'Type' },
-                { key: 'quantity_change', label: 'Qty Change' },
-                { key: 'running_balance', label: 'Running Balance' },
-                { key: 'reference_id', label: 'Reference', value: (row) => `#${row.reference_id}` },
-              ]}
-            />
-            {ledger.entries.length === 0 ? <div className="payment-history-empty">No transactions in this range.</div> : (
-              <table className="procurement-items-table">
-                <thead><tr><th>Date</th><th>Type</th><th>Qty Change</th><th>Running Balance</th><th>Reference</th></tr></thead>
-                <tbody>
-                  {ledger.entries.map((entry) => (
-                    <tr key={entry.id}>
-                      <td data-label="Date">{formatDateTime(entry.created_at)}</td>
-                      <td data-label="Type">{entry.transaction_type.replace(/_/g, ' ')}</td>
-                      <td data-label="Qty Change" style={{ color: entry.quantity_change >= 0 ? 'var(--md-success)' : 'var(--md-danger)', fontWeight: 600 }}>
-                        {entry.quantity_change >= 0 ? '+' : ''}{formatNumber(entry.quantity_change)}
-                      </td>
-                      <td data-label="Running Balance" className="item-subtotal">{formatNumber(entry.running_balance)}</td>
-                      <td data-label="Reference">#{entry.reference_id}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
-          </>
+          ))
         )}
       </ReportShell>
     </>
@@ -569,23 +596,33 @@ const PurchaseSummaryReport = ({ token, onLogout, onSelectSupplier }) => {
                 rows={data.by_product}
                 columns={[
                   { key: 'product_name', label: 'Product' },
+                  { key: 'product_code', label: 'Product Code' },
                   { key: 'total_quantity', label: 'Qty Purchased' },
+                  { key: 'unit', label: 'Unit' },
                   { key: 'total_cost', label: 'Total Cost' },
                 ]}
               />
             </div>
             {data.by_product.length === 0 ? <div className="payment-history-empty">No purchases in this range.</div> : (
               <table className="procurement-items-table">
-                <thead><tr><th>Product</th><th>Qty Purchased</th><th>Total Cost</th></tr></thead>
+                <thead><tr><th>Product</th><th>Product Code</th><th>Qty Purchased</th><th>Unit</th><th>Total Cost</th></tr></thead>
                 <tbody>
                   {data.by_product.map((row) => (
                     <tr key={row.product_id}>
                       <td data-label="Product">{row.product_name}</td>
+                      <td data-label="Product Code">{row.product_code || '-'}</td>
                       <td data-label="Qty Purchased">{formatNumber(row.total_quantity)}</td>
+                      <td data-label="Unit">{row.unit || '-'}</td>
                       <td data-label="Total Cost">{formatNumber(row.total_cost)}</td>
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={4} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                    <td style={{ fontWeight: 600 }}>{formatNumber(data.by_product.reduce((sum, row) => sum + Number(row.total_cost || 0), 0))}</td>
+                  </tr>
+                </tfoot>
               </table>
             )}
           </>
@@ -683,7 +720,7 @@ const ProductionSummaryReport = ({ token, onLogout }) => {
             )}
             <div className="table-headline">
               <div>
-                <h2>Output by Product</h2>
+                <h2>Output by Product (Finished Goods)</h2>
                 {data.output_by_product.length > 0 ? <p>Total estimated value: {formatNumber(data.total_output_value)}</p> : null}
               </div>
               <ExportCsvButton
@@ -692,24 +729,76 @@ const ProductionSummaryReport = ({ token, onLogout }) => {
                 columns={[
                   { key: 'period', label: 'Period' },
                   { key: 'product_name', label: 'Product' },
+                  { key: 'product_code', label: 'Product Code' },
                   { key: 'total_quantity', label: 'Quantity Produced' },
+                  { key: 'unit', label: 'Unit' },
                   { key: 'estimated_value', label: 'Estimated Value' },
                 ]}
               />
             </div>
             {data.output_by_product.length === 0 ? <div className="payment-history-empty">No finished goods produced in this range.</div> : (
-              <table className="procurement-items-table">
-                <thead><tr><th>Period</th><th>Product</th><th>Quantity Produced</th><th>Estimated Value</th></tr></thead>
+              <table className="procurement-items-table" style={{ marginBottom: '20px' }}>
+                <thead><tr><th>Period</th><th>Product</th><th>Product Code</th><th>Quantity Produced</th><th>Unit</th><th>Estimated Value</th></tr></thead>
                 <tbody>
                   {data.output_by_product.map((row, index) => (
                     <tr key={index}>
                       <td data-label="Period">{row.period}</td>
                       <td data-label="Product">{row.product_name}</td>
+                      <td data-label="Product Code">{row.product_code || '-'}</td>
                       <td data-label="Quantity Produced">{formatNumber(row.total_quantity)}</td>
+                      <td data-label="Unit">{row.unit || '-'}</td>
                       <td data-label="Estimated Value">{formatNumber(row.estimated_value)}</td>
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={5} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                    <td style={{ fontWeight: 600 }}>{formatNumber(data.total_output_value)}</td>
+                  </tr>
+                </tfoot>
+              </table>
+            )}
+
+            <div className="table-headline">
+              <div>
+                <h2>Raw Materials Used</h2>
+                {data.input_by_product.length > 0 ? <p>Total cost: {formatNumber(data.total_input_cost_by_product)}</p> : null}
+              </div>
+              <ExportCsvButton
+                filename="production-raw-materials-used.csv"
+                rows={data.input_by_product}
+                columns={[
+                  { key: 'period', label: 'Period' },
+                  { key: 'product_name', label: 'Raw Material' },
+                  { key: 'product_code', label: 'Product Code' },
+                  { key: 'total_quantity', label: 'Quantity Consumed' },
+                  { key: 'unit', label: 'Unit' },
+                  { key: 'input_cost', label: 'Cost' },
+                ]}
+              />
+            </div>
+            {data.input_by_product.length === 0 ? <div className="payment-history-empty">No raw materials consumed in this range.</div> : (
+              <table className="procurement-items-table">
+                <thead><tr><th>Period</th><th>Raw Material</th><th>Product Code</th><th>Quantity Consumed</th><th>Unit</th><th>Cost</th></tr></thead>
+                <tbody>
+                  {data.input_by_product.map((row, index) => (
+                    <tr key={index}>
+                      <td data-label="Period">{row.period}</td>
+                      <td data-label="Raw Material">{row.product_name}</td>
+                      <td data-label="Product Code">{row.product_code || '-'}</td>
+                      <td data-label="Quantity Consumed">{formatNumber(row.total_quantity)}</td>
+                      <td data-label="Unit">{row.unit || '-'}</td>
+                      <td data-label="Cost">{formatNumber(row.input_cost)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={5} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                    <td style={{ fontWeight: 600 }}>{formatNumber(data.total_input_cost_by_product)}</td>
+                  </tr>
+                </tfoot>
               </table>
             )}
           </>
@@ -793,7 +882,9 @@ const SalesSummaryReport = ({ token, onLogout, onSelectCustomer }) => {
                 rows={data.by_product}
                 columns={[
                   { key: 'product_name', label: 'Product' },
+                  { key: 'product_code', label: 'Product Code' },
                   { key: 'total_quantity', label: 'Qty Sold' },
+                  { key: 'unit', label: 'Unit' },
                   { key: 'total_revenue', label: 'Revenue' },
                   { key: 'total_cost', label: 'Cost' },
                   { key: 'margin', label: 'Margin' },
@@ -803,12 +894,14 @@ const SalesSummaryReport = ({ token, onLogout, onSelectCustomer }) => {
             </div>
             {data.by_product.length === 0 ? <div className="payment-history-empty">No sales in this range.</div> : (
               <table className="procurement-items-table" style={{ marginBottom: '20px' }}>
-                <thead><tr><th>Product</th><th>Qty Sold</th><th>Revenue</th><th>Cost</th><th>Margin</th><th>Margin %</th></tr></thead>
+                <thead><tr><th>Product</th><th>Product Code</th><th>Qty Sold</th><th>Unit</th><th>Revenue</th><th>Cost</th><th>Margin</th><th>Margin %</th></tr></thead>
                 <tbody>
                   {data.by_product.map((row) => (
                     <tr key={row.product_id}>
                       <td data-label="Product">{row.product_name}</td>
+                      <td data-label="Product Code">{row.product_code || '-'}</td>
                       <td data-label="Qty Sold">{formatNumber(row.total_quantity)}</td>
+                      <td data-label="Unit">{row.unit || '-'}</td>
                       <td data-label="Revenue">{formatNumber(row.total_revenue)}</td>
                       <td data-label="Cost">{formatNumber(row.total_cost)}</td>
                       <td data-label="Margin" style={{ color: row.margin >= 0 ? 'var(--md-success)' : 'var(--md-danger)', fontWeight: 600 }}>{formatNumber(row.margin)}</td>
@@ -816,6 +909,15 @@ const SalesSummaryReport = ({ token, onLogout, onSelectCustomer }) => {
                     </tr>
                   ))}
                 </tbody>
+                <tfoot>
+                  <tr>
+                    <td colSpan={4} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                    <td style={{ fontWeight: 600 }}>{formatNumber(data.by_product.reduce((sum, row) => sum + Number(row.total_revenue || 0), 0))}</td>
+                    <td style={{ fontWeight: 600 }}>{formatNumber(data.by_product.reduce((sum, row) => sum + Number(row.total_cost || 0), 0))}</td>
+                    <td style={{ fontWeight: 600 }}>{formatNumber(data.by_product.reduce((sum, row) => sum + Number(row.margin || 0), 0))}</td>
+                    <td></td>
+                  </tr>
+                </tfoot>
               </table>
             )}
             <div className="table-headline">
@@ -1214,7 +1316,7 @@ const IncomeExpenseReport = ({ token, onLogout }) => {
             <SearchableSelect
               value={type}
               onChange={(v) => { setType(v); load(v); }}
-              options={[{ value: 'income', label: 'Income' }, { value: 'expense', label: 'Expense' }]}
+              options={[{ value: '', label: 'All' }, { value: 'income', label: 'Income' }, { value: 'expense', label: 'Expense' }]}
               placeholder="All"
             />
           </div>
@@ -1532,6 +1634,7 @@ const SalesBacklogReport = ({ token, onLogout }) => {
   useEffect(() => { load(); }, [token]);
 
   const statusOptions = [
+    { value: '', label: 'All Statuses' },
     { value: 'pending', label: 'Pending' },
     { value: 'approved', label: 'Approved' },
     { value: 'invoiced', label: 'Invoiced' },
@@ -1615,6 +1718,7 @@ const OpenPurchaseOrdersReport = ({ token, onLogout }) => {
   useEffect(() => { load(); }, [token]);
 
   const statusOptions = [
+    { value: '', label: 'All Statuses' },
     { value: 'pending', label: 'Pending' },
     { value: 'approved', label: 'Approved' },
   ];
@@ -1696,7 +1800,7 @@ const InventoryValuationReport = ({ token, onLogout, warehouses }) => {
 
   useEffect(() => { load(); }, [token]);
 
-  const warehouseOptions = useMemo(() => warehouses.map((w) => ({ value: String(w.id), label: w.name })), [warehouses]);
+  const warehouseOptions = useMemo(() => [{ value: '', label: 'All Warehouses' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))], [warehouses]);
 
   return (
     <>
@@ -1785,7 +1889,7 @@ const SlowMovingStockReport = ({ token, onLogout, warehouses }) => {
 
   useEffect(() => { load(); }, [token]);
 
-  const warehouseOptions = useMemo(() => warehouses.map((w) => ({ value: String(w.id), label: w.name })), [warehouses]);
+  const warehouseOptions = useMemo(() => [{ value: '', label: 'All Warehouses' }, ...warehouses.map((w) => ({ value: String(w.id), label: w.name }))], [warehouses]);
 
   return (
     <>
@@ -1804,8 +1908,10 @@ const SlowMovingStockReport = ({ token, onLogout, warehouses }) => {
           rows={data?.items || []}
           columns={[
             { key: 'product_name', label: 'Product' },
+            { key: 'product_code', label: 'Product Code' },
             { key: 'warehouse_name', label: 'Warehouse' },
             { key: 'quantity', label: 'Quantity' },
+            { key: 'unit', label: 'Unit' },
             { key: 'stock_value', label: 'Stock Value' },
             { key: 'days_since_movement', label: 'Days Idle' },
           ]}
@@ -1819,13 +1925,15 @@ const SlowMovingStockReport = ({ token, onLogout, warehouses }) => {
         ) : null}
         {!data || data.items.length === 0 ? <div className="payment-history-empty">Nothing idle for {days}+ days.</div> : (
           <table className="procurement-items-table">
-            <thead><tr><th>Product</th><th>Warehouse</th><th>On Hand</th><th>Stock Value</th><th>Days Idle</th></tr></thead>
+            <thead><tr><th>Product</th><th>Code</th><th>Warehouse</th><th>On Hand</th><th>Unit</th><th>Stock Value</th><th>Days Idle</th></tr></thead>
             <tbody>
               {data.items.map((row, index) => (
                 <tr key={index}>
                   <td data-label="Product">{row.product_name}</td>
+                  <td data-label="Code">{row.product_code || '-'}</td>
                   <td data-label="Warehouse">{row.warehouse_name}</td>
                   <td data-label="On Hand">{formatNumber(row.quantity)}</td>
+                  <td data-label="Unit">{row.unit || '-'}</td>
                   <td data-label="Stock Value">{formatNumber(row.stock_value)}</td>
                   <td data-label="Days Idle" style={{ color: 'var(--md-danger)', fontWeight: 600 }}>
                     {row.days_since_movement >= 99999 ? 'Never moved' : row.days_since_movement}
@@ -1833,6 +1941,13 @@ const SlowMovingStockReport = ({ token, onLogout, warehouses }) => {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={5} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                <td style={{ fontWeight: 600 }}>{formatNumber(data?.total_value)}</td>
+                <td></td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </ReportShell>
@@ -1887,6 +2002,8 @@ const AbcAnalysisReport = ({ token, onLogout }) => {
             columns={[
               { key: 'rank', label: 'Rank' },
               { key: 'product_name', label: 'Product' },
+              { key: 'product_code', label: 'Product Code' },
+              { key: 'unit', label: 'Unit' },
               { key: 'revenue', label: 'Revenue' },
               { key: 'percent_of_total', label: '% of Total', value: (row) => row.percent_of_total.toFixed(1) },
               { key: 'cumulative_percent', label: 'Cumulative %', value: (row) => row.cumulative_percent.toFixed(1) },
@@ -1896,12 +2013,14 @@ const AbcAnalysisReport = ({ token, onLogout }) => {
         </div>
         {!data || data.items.length === 0 ? <div className="payment-history-empty">No sales in this range.</div> : (
           <table className="procurement-items-table">
-            <thead><tr><th>#</th><th>Product</th><th>Revenue</th><th>% of Total</th><th>Cumulative %</th><th>Class</th></tr></thead>
+            <thead><tr><th>#</th><th>Product</th><th>Product Code</th><th>Unit</th><th>Revenue</th><th>% of Total</th><th>Cumulative %</th><th>Class</th></tr></thead>
             <tbody>
               {data.items.map((row) => (
                 <tr key={row.product_id}>
                   <td data-label="#">{row.rank}</td>
                   <td data-label="Product">{row.product_name}</td>
+                  <td data-label="Product Code">{row.product_code || '-'}</td>
+                  <td data-label="Unit">{row.unit || '-'}</td>
                   <td data-label="Revenue">{formatNumber(row.revenue)}</td>
                   <td data-label="% of Total">{row.percent_of_total.toFixed(1)}%</td>
                   <td data-label="Cumulative %">{row.cumulative_percent.toFixed(1)}%</td>
@@ -1909,6 +2028,13 @@ const AbcAnalysisReport = ({ token, onLogout }) => {
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={4} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                <td style={{ fontWeight: 600 }}>{formatNumber(data.items.reduce((sum, row) => sum + Number(row.revenue || 0), 0))}</td>
+                <td colSpan={3}></td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </ReportShell>
@@ -2013,7 +2139,7 @@ const StockAdjustmentReport = ({ token, onLogout }) => {
 
   useEffect(() => { load(); }, [token]);
 
-  const typeOptions = useMemo(() => ADJUSTMENT_TYPES.map((t) => ({ value: t, label: t.replace(/^\w/, (c) => c.toUpperCase()) })), []);
+  const typeOptions = useMemo(() => [{ value: '', label: 'All Types' }, ...ADJUSTMENT_TYPES.map((t) => ({ value: t, label: t.replace(/^\w/, (c) => c.toUpperCase()) }))], []);
 
   return (
     <>
@@ -2064,8 +2190,10 @@ const StockAdjustmentReport = ({ token, onLogout }) => {
               { key: 'date', label: 'Date', value: (row) => formatDate(row.date) },
               { key: 'warehouse_name', label: 'Warehouse' },
               { key: 'product_name', label: 'Product' },
+              { key: 'product_code', label: 'Product Code' },
               { key: 'type', label: 'Type' },
               { key: 'quantity', label: 'Quantity' },
+              { key: 'unit', label: 'Unit' },
               { key: 'value_impact', label: 'Value Impact' },
               { key: 'reason', label: 'Reason' },
             ]}
@@ -2073,7 +2201,7 @@ const StockAdjustmentReport = ({ token, onLogout }) => {
         </div>
         {!data || data.items.length === 0 ? <div className="payment-history-empty">No adjustments in this range.</div> : (
           <table className="procurement-items-table">
-            <thead><tr><th>Adjustment #</th><th>Date</th><th>Warehouse</th><th>Product</th><th>Type</th><th>Quantity</th><th>Value Impact</th></tr></thead>
+            <thead><tr><th>Adjustment #</th><th>Date</th><th>Warehouse</th><th>Product</th><th>Code</th><th>Type</th><th>Quantity</th><th>Unit</th><th>Value Impact</th></tr></thead>
             <tbody>
               {data.items.map((row, index) => (
                 <tr key={index}>
@@ -2081,14 +2209,22 @@ const StockAdjustmentReport = ({ token, onLogout }) => {
                   <td data-label="Date">{formatDate(row.date)}</td>
                   <td data-label="Warehouse">{row.warehouse_name}</td>
                   <td data-label="Product">{row.product_name}</td>
+                  <td data-label="Code">{row.product_code || '-'}</td>
                   <td data-label="Type" style={{ textTransform: 'capitalize' }}>{row.type}</td>
                   <td data-label="Quantity" style={{ color: row.quantity >= 0 ? 'var(--md-success)' : 'var(--md-danger)' }}>
                     {row.quantity >= 0 ? '+' : ''}{formatNumber(row.quantity)}
                   </td>
+                  <td data-label="Unit">{row.unit || '-'}</td>
                   <td data-label="Value Impact" style={{ color: row.value_impact >= 0 ? 'var(--md-success)' : 'var(--md-danger)' }}>{formatNumber(row.value_impact)}</td>
                 </tr>
               ))}
             </tbody>
+            <tfoot>
+              <tr>
+                <td colSpan={8} style={{ fontWeight: 600, textAlign: 'right' }}>Total</td>
+                <td style={{ fontWeight: 600 }}>{formatNumber(data?.total_value_impact)}</td>
+              </tr>
+            </tfoot>
           </table>
         )}
       </ReportShell>
@@ -2483,6 +2619,7 @@ const DeliveryPerformanceReport = ({ token, onLogout }) => {
 
 // ─────────────────────────── Document Register ───────────────────────────
 const DOCUMENT_TYPES = [
+  { value: '', label: 'All Types' },
   { value: 'purchase_order', label: 'Purchase Order' },
   { value: 'purchase_voucher', label: 'Purchase Voucher' },
   { value: 'sale_order', label: 'Sale Order' },
@@ -2746,9 +2883,11 @@ const ExpiryReport = ({ token, onLogout }) => {
           columns={[
             { key: 'source', label: 'Source' },
             { key: 'product_name', label: 'Product' },
+            { key: 'product_code', label: 'Product Code' },
             { key: 'lot_number', label: 'Lot #' },
             { key: 'warehouse_name', label: 'Warehouse' },
             { key: 'quantity', label: 'Quantity' },
+            { key: 'unit', label: 'Unit' },
             { key: 'expiry_date', label: 'Expiry Date', value: (row) => formatDate(row.expiry_date) },
             { key: 'days_until_expiry', label: 'Days Until Expiry' },
             { key: 'reference', label: 'Reference' },
@@ -2774,15 +2913,17 @@ const ExpiryReport = ({ token, onLogout }) => {
         ) : null}
         {!data || data.items.length === 0 ? <div className="payment-history-empty">No batches with an expiry date recorded.</div> : (
           <table className="procurement-items-table">
-            <thead><tr><th>Source</th><th>Product</th><th>Lot #</th><th>Warehouse</th><th>Quantity</th><th>Expiry Date</th><th>Days Left</th><th>Reference</th></tr></thead>
+            <thead><tr><th>Source</th><th>Product</th><th>Code</th><th>Lot #</th><th>Warehouse</th><th>Quantity</th><th>Unit</th><th>Expiry Date</th><th>Days Left</th><th>Reference</th></tr></thead>
             <tbody>
               {data.items.map((row, index) => (
                 <tr key={index}>
                   <td data-label="Source" style={{ textTransform: 'capitalize' }}>{row.source}</td>
                   <td data-label="Product">{row.product_name}</td>
+                  <td data-label="Code">{row.product_code || '-'}</td>
                   <td data-label="Lot #">{row.lot_number || '-'}</td>
                   <td data-label="Warehouse">{row.warehouse_name}</td>
                   <td data-label="Quantity">{formatNumber(row.quantity)}</td>
+                  <td data-label="Unit">{row.unit || '-'}</td>
                   <td data-label="Expiry Date">{formatDate(row.expiry_date)}</td>
                   <td
                     data-label="Days Left"

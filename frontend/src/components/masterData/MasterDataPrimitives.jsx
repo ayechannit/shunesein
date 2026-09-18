@@ -933,17 +933,17 @@ export const DataTable = ({
                                   <span>Make Default</span>
                                 </button>
                               ) : null}
-                              {rowActions.includes('quantity-pricing') && onExtraAction ? (
+                              {rowActions.includes('price-level-pricing') && onExtraAction ? (
                                 <button
                                   type="button"
                                   className="dropdown-menu-item"
                                   onClick={() => {
-                                    onExtraAction('quantity-pricing', row);
+                                    onExtraAction('price-level-pricing', row);
                                     onToggleMenu(null);
                                   }}
                                 >
                                   <AppIcon name="tag" className="menu-icon" />
-                                  <span>Quantity Pricing</span>
+                                  <span>Price Level Pricing</span>
                                 </button>
                               ) : null}
                               {rowActions.includes('delete') ? (

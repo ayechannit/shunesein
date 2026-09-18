@@ -768,6 +768,115 @@ class PurchaseController {
     }
   };
 
+  // Update Purchase Return - adds the old return's stock back in (always
+  // safe, no "already sold" guard needed - same as delete), then reapplies
+  // the edited version with the create path's insufficient-stock guard.
+  updateReturn = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { supplier_id, warehouse_id, return_date, reason, items } = req.body;
+      const voucher_id = req.body.voucher_id ? Number(req.body.voucher_id) : null;
+
+      if (!items || items.length === 0) {
+        return res.status(400).json({ error: 'At least one item is required' });
+      }
+
+      const existing = await db.query('SELECT * FROM purchase_returns WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ error: 'Purchase return not found' });
+      }
+      if (existing.rows[0].warehouse_id !== warehouse_id) {
+        return res.status(400).json({ error: 'Changing the warehouse on an existing return is not supported - delete and recreate it instead' });
+      }
+
+      const ret = await db.withTransaction(async (client) => {
+        const oldItemsResult = await client.query('SELECT product_id, quantity FROM purchase_return_items WHERE return_id = $1', [id]);
+
+        for (const item of oldItemsResult.rows) {
+          await client.query(
+            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+            [warehouse_id, item.product_id, item.quantity]
+          );
+          await recordStockTransaction(client, item.product_id, warehouse_id, Number(item.quantity), 'purchase_return_edit_reversal', id);
+        }
+
+        let total_amount = 0;
+        for (const item of items) {
+          total_amount += Number(item.quantity) * Number(item.unit_price);
+        }
+
+        const updateQuery = `
+          UPDATE purchase_returns
+          SET supplier_id = $1, voucher_id = $2, return_date = $3, reason = $4, total_amount = $5
+          WHERE id = $6
+          RETURNING *
+        `;
+        const updateResult = await client.query(updateQuery, [supplier_id, voucher_id, return_date, reason || null, total_amount, id]);
+        const updated = updateResult.rows[0];
+
+        await client.query('DELETE FROM purchase_return_items WHERE return_id = $1', [id]);
+        const itemQuery = `INSERT INTO purchase_return_items (return_id, product_id, quantity, unit_price) VALUES ($1, $2, $3, $4)`;
+        for (const item of items) {
+          const stockResult = await client.query(
+            'SELECT quantity FROM stock_levels WHERE warehouse_id = $1 AND product_id = $2 FOR UPDATE',
+            [warehouse_id, item.product_id]
+          );
+          const availableQty = Number(stockResult.rows[0]?.quantity || 0);
+          if (availableQty < Number(item.quantity)) {
+            throw new HttpError(400, `Insufficient stock for product ID ${item.product_id} to return. Available: ${availableQty}, requested: ${item.quantity}.`);
+          }
+
+          await client.query(itemQuery, [id, item.product_id, item.quantity, item.unit_price]);
+          await client.query('UPDATE stock_levels SET quantity = quantity - $1 WHERE warehouse_id = $2 AND product_id = $3', [item.quantity, warehouse_id, item.product_id]);
+          await recordStockTransaction(client, item.product_id, warehouse_id, -Number(item.quantity), 'purchase_return_edit', id);
+        }
+
+        // Reconcile supplier outstanding_balance the same delta-or-full-reverse
+        // way updateVoucher does (sign flipped, since returns reduce what's owed).
+        const oldSupplierId = existing.rows[0].supplier_id;
+        const oldTotalAmount = Number(existing.rows[0].total_amount);
+        const newTotalAmount = Number(updated.total_amount);
+
+        if (oldSupplierId && supplier_id && oldSupplierId === supplier_id) {
+          const balanceDelta = newTotalAmount - oldTotalAmount;
+          if (balanceDelta !== 0) {
+            await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [balanceDelta, supplier_id]);
+          }
+        } else {
+          if (oldSupplierId) {
+            await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2', [oldTotalAmount, oldSupplierId]);
+          }
+          if (supplier_id) {
+            await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [newTotalAmount, supplier_id]);
+          }
+        }
+
+        await reverseJournalEntries(client, { referenceType: 'purchase_return', referenceId: id, date: return_date, description: 'Superseded by edit', createdBy: req.user.id });
+        await postJournalEntry(client, {
+          date: updated.return_date,
+          referenceType: 'purchase_return',
+          referenceId: updated.id,
+          description: `Purchase Return ${updated.return_number} (edited)`,
+          createdBy: req.user.id,
+          lines: [
+            { code: ACCOUNT_CODES.ACCOUNTS_PAYABLE, debit: newTotalAmount },
+            { code: ACCOUNT_CODES.INVENTORY, credit: newTotalAmount },
+          ],
+        });
+
+        await logAction(req.user.id, 'UPDATE', 'purchase_returns', id, existing.rows[0], updated, client);
+        return updated;
+      });
+
+      res.json({ message: 'Purchase return updated successfully', data: ret });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ error: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
   // Delete Purchase Return - fully reverses it: adds the stock back in
   // (always safe - unlike the create path, there's no "already sold" risk
   // when giving stock back to yourself) and restores the supplier balance.

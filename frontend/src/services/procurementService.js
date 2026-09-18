@@ -116,6 +116,13 @@ export const createPurchaseReturn = async (token, payload) =>
     body: JSON.stringify(payload),
   });
 
+export const updatePurchaseReturn = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/procurement/returns/${id}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
 export const deletePurchaseReturn = async (token, id) =>
   buildRequest(`${API_ROOT}/procurement/returns/${id}`, token, {
     method: 'DELETE',
@@ -163,6 +170,13 @@ export const fetchPayments = async (token, params = {}) => {
   });
   return buildRequest(`${API_ROOT}/payments?${query.toString()}`, token);
 };
+
+export const updatePayment = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/payments/${id}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
 
 export const deletePayment = async (token, id) =>
   buildRequest(`${API_ROOT}/payments/${id}`, token, {

@@ -45,6 +45,18 @@ export const updateProductionBatchStatus = async (token, id, payload) =>
     body: JSON.stringify(payload),
   });
 
+export const updateProductionBatch = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/inventory/batches/${id}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+export const deleteProductionBatch = async (token, id) =>
+  buildRequest(`${API_ROOT}/inventory/batches/${id}`, token, {
+    method: 'DELETE',
+  });
+
 // Stock Transfers
 export const fetchStockTransfers = async (token, params = {}) => {
   const query = new URLSearchParams({ page: '1', limit: '20', ...params });
@@ -68,6 +80,18 @@ export const updateStockTransferStatus = async (token, id, status) =>
     body: JSON.stringify({ status }),
   });
 
+export const updateStockTransfer = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/inventory/transfers/${id}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+export const deleteStockTransfer = async (token, id) =>
+  buildRequest(`${API_ROOT}/inventory/transfers/${id}`, token, {
+    method: 'DELETE',
+  });
+
 // Stock Adjustments
 export const fetchStockAdjustments = async (token, params = {}) => {
   const query = new URLSearchParams({ page: '1', limit: '20', ...params });
@@ -82,6 +106,18 @@ export const createStockAdjustment = async (token, payload) =>
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
+  });
+
+export const updateStockAdjustment = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/inventory/adjustments/${id}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+export const deleteStockAdjustment = async (token, id) =>
+  buildRequest(`${API_ROOT}/inventory/adjustments/${id}`, token, {
+    method: 'DELETE',
   });
 
 // Stock Count

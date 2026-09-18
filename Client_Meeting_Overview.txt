@@ -1,0 +1,259 @@
+Tea Leaf & Fried Bean Management System (Shunesein / Ma Cherry)
+System Overview — For Client Meeting
+=====================================
+
+EXECUTIVE SUMMARY
+------------------
+The system covers all 23 modules from the original scope, end to end — every
+screen a staff member uses is backed by a working process behind it, not a
+placeholder. Beyond the original scope, the reporting section now offers far
+more reports than originally planned, and the whole system keeps a proper
+running set of accounting books in the background, so financial figures
+(profit, cash position, outstanding balances) stay accurate automatically as
+day-to-day work happens, without anyone needing to do manual bookkeeping.
+
+Every action a user takes — creating a purchase, recording a payment, editing
+a product — is logged with who did it and when, and every screen is
+permission-controlled, so staff only see and do what their role allows.
+
+Below is a walkthrough of each module: what it does for the business, and
+what is available today.
+
+
+1. DASHBOARD
+------------
+The homepage after login. At a glance, an owner/manager sees:
+- Today's sales, purchases, and production output
+- Current cash and bank balances
+- How much customers owe the business, and how much the business owes
+  suppliers — broken down by how overdue each amount is
+- Items running low on stock, ready to reorder
+- Best-selling products over the last 30 days
+- A 6-month trend chart of sales, expenses, and cash flow
+Status: Fully working.
+
+
+2. USER & PERMISSION MANAGEMENT
+--------------------------------
+Admins can create staff accounts and assign roles (e.g. Cashier, Store
+Manager, Accountant, Owner). Each role can be given fine-grained permissions
+— down to individual actions like "can record a payment" or "can view the
+Profit & Loss report" — not just broad on/off access per module. The Owner
+role is protected and cannot be edited or deleted by mistake.
+Status: Fully working.
+
+
+3. PRODUCT (STOCK) MASTER
+---------------------------
+The master list of everything the business buys, produces, and sells —
+tea leaves, fried beans, raw materials, and finished goods. Each product has
+a cost price, a markup rule, and the system automatically calculates the
+selling price from it (so pricing stays consistent, even during bulk
+updates via spreadsheet import). Supports bulk import/export via CSV.
+Status: Fully working.
+
+
+4. CATEGORY MANAGEMENT
+------------------------
+Simple grouping of products into categories for organization and reporting.
+Status: Fully working.
+
+
+5. SUPPLIER MANAGEMENT
+------------------------
+Master list of suppliers with contact details and a running "amount owed to
+this supplier" balance that updates automatically from purchases, returns,
+and payments — no manual balance entry needed.
+Status: Fully working.
+
+
+6. CUSTOMER MANAGEMENT
+------------------------
+Master list of customers with contact details, an optional credit limit, and
+a running "amount owed by this customer" balance, updated automatically from
+sales, returns, and receipts.
+Status: Fully working.
+Note for discussion: the credit limit field is stored and visible, but the
+system does not yet block a new sale if a customer is already over their
+limit. This can be added if it's a priority.
+
+
+7. WAREHOUSE / STORE MANAGEMENT
+---------------------------------
+Master list of storage locations (main warehouse, branch stores, etc.).
+Stock is tracked separately per warehouse, and the system will not allow
+stock to go negative at any location.
+Status: Fully working.
+
+
+8. PURCHASE MANAGEMENT
+------------------------
+Recording goods received from suppliers. When a purchase is recorded, the
+system automatically: increases stock at the right warehouse, increases the
+amount owed to that supplier, and updates the accounting books. Purchase
+returns (sending goods back to a supplier) are also fully supported, with
+everything above reversing correctly. Edits are safely restricted once a
+payment or a stock movement has already happened against a purchase, to
+prevent numbers going out of sync.
+Status: Fully working.
+
+
+9. PRODUCTION ENTRY
+---------------------
+Records converting raw materials into finished goods (e.g. raw tea leaves
+into packaged tea). The system checks that only proper raw materials go in
+and only proper finished goods come out, deducts the raw material stock when
+production starts, and adds the finished goods to stock once production is
+marked complete. Production can also be cancelled midway, with stock
+correctly restored.
+Status: Fully working.
+
+
+10. STOCK TRANSFER
+--------------------
+Moving stock between warehouses/branches, with a clear approval flow:
+requested, approved, shipped, received. Stock is only deducted from the
+source and added to the destination once the transfer actually completes —
+so the stock count always reflects reality, not just a status label.
+Status: Fully working.
+
+
+11. STOCK ADJUSTMENT
+----------------------
+For correcting stock manually — e.g. damaged, expired, or missing items.
+Applied immediately, with a check that stock can never be adjusted below
+zero.
+Status: Fully working.
+
+
+12. STOCK COUNT
+------------------
+Supports a full physical stock count at a warehouse: staff enter what they
+physically counted, and the system automatically works out and applies the
+difference against what the books say should be there.
+Status: Fully working.
+
+
+13. SALES MANAGEMENT
+-----------------------
+Recording sales to customers. Mirrors Purchase Management: stock is
+automatically reduced, the customer's balance owed increases, and the
+accounting books update — all in one step. Sales returns (customer sending
+goods back) are fully supported with everything reversing correctly.
+Status: Fully working.
+
+
+14. DELIVERY MANAGEMENT
+--------------------------
+Tracks getting sold goods to the customer — one delivery trip can cover
+multiple invoices at once (useful for customers who order frequently).
+Status tracked from pending, to shipped, to delivered.
+Status: Fully working.
+
+
+15. CUSTOMER RECEIPT
+-----------------------
+Recording money received from a customer against their outstanding
+invoices. The system prevents collecting more than what's actually owed,
+updates the customer's balance and the relevant cash/bank account, and
+supports full reversal if a receipt was entered in error.
+Status: Fully working.
+
+
+16. SUPPLIER PAYMENT
+-----------------------
+The mirror of Customer Receipt — recording money paid out to a supplier
+against what's owed to them, with the same safeguards.
+Status: Fully working.
+
+
+17. CASH & BANK MANAGEMENT
+-----------------------------
+A full running ledger (like a bank statement) for every cash and bank
+account the business uses — every receipt, payment, and transfer shown in
+order, with a running balance and an opening balance for any date range you
+choose. Also supports moving money directly between the business's own
+accounts (e.g. bank to petty cash).
+Status: Fully working — this is one of the most complete modules in the
+system.
+
+
+18. INCOME & EXPENSE MANAGEMENT
+----------------------------------
+Recording other business income and expenses that aren't tied to a purchase
+or sale (rent, utilities, misc. income, etc.), categorized and reflected
+immediately in the relevant account balance and financial reports.
+Status: Fully working.
+
+
+19. REPORTS
+-------------
+This module has grown well beyond the original plan. It now includes over
+30 reports, covering:
+- Stock: current stock, stock ledger (full transaction history), stock
+  movement, low stock, stock valuation, slow-moving items, expiry tracking
+- Purchasing: purchase summary, purchase order variance, supplier
+  performance/scorecards
+- Production: daily and monthly production summaries
+- Sales: sales summary, salesperson performance, sales by category
+- Finance & Accounting: Profit & Loss, Trial Balance, Balance Sheet, Cash
+  Flow Statement, customer/supplier outstanding & aging, tax summary
+Every report can be viewed and filtered on screen, and every report's
+visibility is controlled per staff role.
+Status: Fully working, and the Profit & Loss calculation correctly accounts
+for real cost of goods (not just raw purchase totals), giving an accurate
+profit figure.
+
+
+20. AUDIT LOG
+---------------
+A complete history of who did what and when — every create, edit, delete,
+login, and print action across the whole system is recorded, with the
+ability to see exactly what changed on any given record. Useful for
+accountability and resolving "who changed this" questions.
+Status: Fully working.
+
+
+21. SYSTEM SETTINGS
+----------------------
+Currently covers print layout settings — configurable page sizes/margins
+for printed invoices, receipts, and vouchers, with one profile set as the
+default.
+Note for discussion: this is the one module scoped narrower than its name
+suggests — there's no general "company settings" screen beyond print setup
+today. If there are other settings the client expects here (e.g. company
+info, tax settings), we should scope that out together.
+
+
+22. PURCHASE ORDER
+----------------------
+The planning stage before a Purchase (Module 8) — raising an order to a
+supplier, approving it, and converting it into an actual received purchase
+once goods arrive. Orders can be edited or cancelled freely before
+approval.
+Status: Fully working.
+
+
+23. SALE ORDER
+------------------
+The planning stage before a Sale (Module 13) — same idea as Purchase Order,
+for the sales side: create an order, approve it, then convert it into an
+invoice once ready to fulfill.
+Status: Fully working.
+
+
+CLOSING NOTES
+--------------
+Everything above is live and working end to end — not a demo or a partial
+build. On top of the original 23-module scope, the system has grown
+significant additional value: 30+ reports instead of the ~9 originally
+planned, and full double-entry-style bookkeeping running quietly behind
+every transaction so the financial reports can be trusted.
+
+A short list of open discussion items for this meeting:
+1. Should customer credit limits actively block new sales, or stay as a
+   visual reference only (current behavior)?
+2. Is there a need for a broader "Company / System Settings" screen beyond
+   print layout (e.g. company profile, tax rate defaults)?
+3. Any additional reports or dashboard metrics the client would like added,
+   now that the reporting engine is in place?

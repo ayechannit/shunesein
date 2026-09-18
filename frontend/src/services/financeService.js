@@ -41,6 +41,13 @@ export const createEntry = async (token, payload) =>
     body: JSON.stringify(payload),
   });
 
+export const updateEntry = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/finance/entries/${id}`, token, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
 export const deleteEntry = async (token, id) =>
   buildRequest(`${API_ROOT}/finance/entries/${id}`, token, { method: 'DELETE' });
 
@@ -53,6 +60,13 @@ export const fetchTransfers = async (token, params = {}) => {
 export const createTransfer = async (token, payload) =>
   buildRequest(`${API_ROOT}/finance/transfers`, token, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+export const updateTransfer = async (token, id, payload) =>
+  buildRequest(`${API_ROOT}/finance/transfers/${id}`, token, {
+    method: 'PUT',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });

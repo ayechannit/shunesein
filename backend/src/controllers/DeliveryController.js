@@ -110,6 +110,79 @@ class DeliveryController {
     }
   };
 
+  // Update Delivery - only while still 'pending' (before it's shipped), same
+  // convention as Sale/Purchase Orders. No stock/GL reversal needed since
+  // deliveries never have stock/financial side effects.
+  update = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const { delivery_number, invoice_ids, date, vehicle_info, driver_name, remark } = req.body;
+
+      const ids = Array.isArray(invoice_ids) ? [...new Set(invoice_ids.map(Number))].filter(Boolean) : [];
+      if (ids.length === 0) {
+        return res.status(400).json({ message: 'At least one sales invoice is required.' });
+      }
+
+      const existing = await db.query('SELECT * FROM deliveries WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ message: 'Delivery not found' });
+      }
+      if (existing.rows[0].status !== 'pending') {
+        return res.status(400).json({ message: 'Only pending deliveries can be edited' });
+      }
+
+      const delivery = await db.withTransaction(async (client) => {
+        const invoiceResult = await client.query('SELECT id FROM sales_invoices WHERE id = ANY($1)', [ids]);
+        if (invoiceResult.rows.length !== ids.length) {
+          throw new HttpError(400, 'One or more selected sales invoices were not found.');
+        }
+
+        const updateResult = await client.query(
+          `UPDATE deliveries SET delivery_number = $1, date = $2, vehicle_info = $3, driver_name = $4, remark = $5
+           WHERE id = $6 RETURNING *`,
+          [delivery_number, date, vehicle_info, driver_name, remark, id]
+        );
+        const updated = updateResult.rows[0];
+
+        await client.query('DELETE FROM delivery_invoices WHERE delivery_id = $1', [id]);
+        for (const invoiceId of ids) {
+          await client.query('INSERT INTO delivery_invoices (delivery_id, invoice_id) VALUES ($1, $2)', [id, invoiceId]);
+        }
+
+        await logAction(req.user.id, 'UPDATE', 'deliveries', id, existing.rows[0], updated, client);
+        return { ...updated, invoice_ids: ids };
+      });
+
+      res.json({ message: 'Delivery updated successfully', data: delivery });
+    } catch (error) {
+      if (error instanceof HttpError) {
+        return res.status(error.statusCode).json({ message: error.message });
+      }
+      res.status(500).json({ error: error.message });
+    }
+  };
+
+  // Delete Delivery - only while still 'pending'.
+  delete = async (req, res) => {
+    try {
+      const { id } = req.params;
+      const existing = await db.query('SELECT * FROM deliveries WHERE id = $1', [id]);
+      if (existing.rows.length === 0) {
+        return res.status(404).json({ message: 'Delivery not found' });
+      }
+      if (existing.rows[0].status !== 'pending') {
+        return res.status(400).json({ message: 'Only pending deliveries can be deleted' });
+      }
+
+      await db.query('DELETE FROM deliveries WHERE id = $1', [id]);
+      await logAction(req.user.id, 'DELETE', 'deliveries', id, existing.rows[0], null);
+
+      res.json({ message: 'Delivery deleted successfully' });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
   // Update Delivery Status
   updateStatus = async (req, res) => {
     try {

@@ -136,7 +136,7 @@ class ReportController {
       const whereClause = warehouse_id ? 'WHERE sl.warehouse_id = $1' : '';
       const params = warehouse_id ? [warehouse_id] : [];
       const query = `
-        SELECT p.name as product_name, p.product_code, w.name as warehouse_name,
+        SELECT p.name as product_name, p.product_code, p.unit, w.name as warehouse_name,
                sl.quantity, p.cost_price, (sl.quantity * p.cost_price) as stock_value
         FROM stock_levels sl
         JOIN products p ON sl.product_id = p.id
@@ -158,7 +158,7 @@ class ReportController {
   getLowStock = async (req, res) => {
     try {
       const query = `
-        SELECT p.name as product_name, p.min_stock_level, w.name as warehouse_name, sl.quantity,
+        SELECT p.name as product_name, p.product_code, p.unit, p.min_stock_level, w.name as warehouse_name, sl.quantity,
                p.cost_price, (p.min_stock_level - sl.quantity) as shortfall,
                ((p.min_stock_level - sl.quantity) * p.cost_price) as reorder_value
         FROM stock_levels sl
@@ -206,7 +206,7 @@ class ReportController {
       // candidate source is joined conditionally and COALESCEd into one
       // human-readable reference_number (e.g. the actual voucher/invoice number).
       const dataQuery = `
-        SELECT st.*, p.name as product_name, p.product_code, w.name as warehouse_name,
+        SELECT st.*, p.name as product_name, p.product_code, p.unit, w.name as warehouse_name,
                p.cost_price, (st.quantity_change * p.cost_price) as value_change,
                COALESCE(pvo.voucher_number, si2.invoice_number, sf.transfer_number, sa.adjustment_number, pb2.batch_number) as reference_number
         FROM stock_transactions st
@@ -258,13 +258,13 @@ class ReportController {
           [from, to]
         ),
         db.query(
-          `SELECT p.id as product_id, p.name as product_name,
+          `SELECT p.id as product_id, p.name as product_name, p.product_code, p.unit,
                   SUM(pi.quantity) as total_quantity, SUM(pi.subtotal) as total_cost
            FROM purchase_items pi
            JOIN purchase_vouchers pv ON pi.voucher_id = pv.id
            JOIN products p ON pi.product_id = p.id
            WHERE pv.voucher_date BETWEEN $1 AND $2
-           GROUP BY p.id, p.name
+           GROUP BY p.id, p.name, p.product_code, p.unit
            ORDER BY total_cost DESC`,
           [from, to]
         ),
@@ -325,24 +325,44 @@ class ReportController {
         ),
         db.query(
           `SELECT TO_CHAR(pb.end_date, '${dateFormat}') as period,
-                  p.id as product_id, p.name as product_name, SUM(pfg.quantity) as total_quantity,
+                  p.id as product_id, p.name as product_name, p.product_code, p.unit,
+                  SUM(pfg.quantity) as total_quantity,
                   SUM(pfg.quantity * COALESCE(pfg.unit_cost, p.cost_price)) as estimated_value
            FROM production_finished_goods pfg
            JOIN production_batches pb ON pfg.batch_id = pb.id
            JOIN products p ON pfg.product_id = p.id
            WHERE pb.status = 'completed' AND pb.end_date BETWEEN $1 AND $2
-           GROUP BY period, p.id, p.name
+           GROUP BY period, p.id, p.name, p.product_code, p.unit
            ORDER BY period, total_quantity DESC`,
           [from, `${to} 23:59:59`]
         ),
+        // Raw materials are never sold, so products.cost_price is often left
+        // at its default 0 for them (nothing in the purchase workflow keeps
+        // it in sync, unlike selling_price for finished goods). Treating an
+        // unset (zero) cost_price as a real cost of zero silently zeroes out
+        // that material's contribution to input_cost, even when it has real
+        // purchase history - so a genuinely-zero cost_price falls through to
+        // the most recent purchase price for that product as of the batch,
+        // and only defaults to 0 if neither exists.
         db.query(
           `SELECT TO_CHAR(pb.end_date, '${dateFormat}') as period,
-                  SUM(prm.quantity * COALESCE(prm.unit_cost, 0)) as input_cost
+                  p.id as product_id, p.name as product_name, p.product_code, p.unit,
+                  SUM(prm.quantity) as total_quantity,
+                  SUM(prm.quantity * COALESCE(
+                    prm.unit_cost,
+                    NULLIF(p.cost_price, 0),
+                    (SELECT pi.unit_price FROM purchase_items pi
+                     JOIN purchase_vouchers pv ON pi.voucher_id = pv.id
+                     WHERE pi.product_id = p.id AND pv.voucher_date <= pb.end_date
+                     ORDER BY pv.voucher_date DESC, pi.id DESC LIMIT 1),
+                    0
+                  )) as input_cost
            FROM production_raw_materials prm
            JOIN production_batches pb ON prm.batch_id = pb.id
+           JOIN products p ON prm.product_id = p.id
            WHERE pb.status = 'completed' AND pb.end_date BETWEEN $1 AND $2
-           GROUP BY period
-           ORDER BY period`,
+           GROUP BY period, p.id, p.name, p.product_code, p.unit
+           ORDER BY period, total_quantity DESC`,
           [from, `${to} 23:59:59`]
         ),
       ]);
@@ -353,11 +373,20 @@ class ReportController {
         estimated_value: toNumber(row.estimated_value),
       }));
 
+      const inputByProduct = input.rows.map((row) => ({
+        ...row,
+        total_quantity: toNumber(row.total_quantity),
+        input_cost: toNumber(row.input_cost),
+      }));
+
       const outputValueByPeriod = new Map();
       outputByProduct.forEach((row) => {
         outputValueByPeriod.set(row.period, (outputValueByPeriod.get(row.period) || 0) + row.estimated_value);
       });
-      const inputCostByPeriod = new Map(input.rows.map((row) => [row.period, toNumber(row.input_cost)]));
+      const inputCostByPeriod = new Map();
+      inputByProduct.forEach((row) => {
+        inputCostByPeriod.set(row.period, (inputCostByPeriod.get(row.period) || 0) + row.input_cost);
+      });
       const allPeriods = Array.from(new Set([...outputValueByPeriod.keys(), ...inputCostByPeriod.keys()])).sort();
 
       const yieldByPeriod = allPeriods.map((period) => {
@@ -385,6 +414,8 @@ class ReportController {
         })),
         output_by_product: outputByProduct,
         total_output_value: outputByProduct.reduce((sum, row) => sum + row.estimated_value, 0),
+        input_by_product: inputByProduct,
+        total_input_cost_by_product: inputByProduct.reduce((sum, row) => sum + row.input_cost, 0),
         yield_by_period: yieldByPeriod,
         total_input_cost: yieldByPeriod.reduce((sum, row) => sum + row.input_cost, 0),
       });
@@ -410,14 +441,14 @@ class ReportController {
           [from, to]
         ),
         db.query(
-          `SELECT p.id as product_id, p.name as product_name,
+          `SELECT p.id as product_id, p.name as product_name, p.product_code, p.unit,
                   SUM(si.quantity) as total_quantity, SUM(si.subtotal) as total_revenue,
                   SUM(si.quantity * p.cost_price) as total_cost
            FROM sales_items si
            JOIN sales_invoices inv ON si.invoice_id = inv.id
            JOIN products p ON si.product_id = p.id
            WHERE inv.invoice_date BETWEEN $1 AND $2
-           GROUP BY p.id, p.name
+           GROUP BY p.id, p.name, p.product_code, p.unit
            ORDER BY total_revenue DESC`,
           [from, to]
         ),
@@ -1021,7 +1052,7 @@ class ReportController {
           FROM stock_transactions
           GROUP BY product_id, warehouse_id
         )
-        SELECT p.name as product_name, p.product_code, w.name as warehouse_name, sl.quantity,
+        SELECT p.name as product_name, p.product_code, p.unit, w.name as warehouse_name, sl.quantity,
                p.cost_price, (sl.quantity * p.cost_price) as stock_value,
                la.last_moved,
                COALESCE((CURRENT_DATE - la.last_moved::date), 99999) as days_since_movement
@@ -1054,13 +1085,13 @@ class ReportController {
     try {
       const { from, to } = resolveDateRange(req.query.from, req.query.to);
       const result = await db.query(
-        `SELECT p.id as product_id, p.name as product_name, p.product_code,
+        `SELECT p.id as product_id, p.name as product_name, p.product_code, p.unit,
                 SUM(si.quantity) as total_quantity, SUM(si.subtotal) as revenue
          FROM sales_items si
          JOIN sales_invoices inv ON si.invoice_id = inv.id
          JOIN products p ON si.product_id = p.id
          WHERE inv.invoice_date BETWEEN $1 AND $2
-         GROUP BY p.id, p.name, p.product_code
+         GROUP BY p.id, p.name, p.product_code, p.unit
          ORDER BY revenue DESC`,
         [from, to]
       );
@@ -1147,7 +1178,7 @@ class ReportController {
       const [items, byType] = await Promise.all([
         db.query(
           `SELECT sa.id, sa.adjustment_number, sa.date, w.name as warehouse_name, sa.reason,
-                  sai.type, p.name as product_name, sai.quantity, p.cost_price,
+                  sai.type, p.name as product_name, p.product_code, p.unit, sai.quantity, p.cost_price,
                   (sai.quantity * p.cost_price) as value_impact
            FROM stock_adjustment_items sai
            JOIN stock_adjustments sa ON sai.adjustment_id = sa.id
@@ -1558,7 +1589,7 @@ class ReportController {
 
       const result = await db.query(
         `SELECT * FROM (
-           SELECT 'purchased' as source, pi.lot_number, pi.expiry_date, p.name as product_name, p.product_code,
+           SELECT 'purchased' as source, pi.lot_number, pi.expiry_date, p.name as product_name, p.product_code, p.unit,
                   w.name as warehouse_name, pi.quantity, pv.voucher_number as reference, pv.voucher_date as source_date
            FROM purchase_items pi
            JOIN purchase_vouchers pv ON pi.voucher_id = pv.id
@@ -1566,7 +1597,7 @@ class ReportController {
            JOIN warehouses w ON pv.warehouse_id = w.id
            WHERE pi.expiry_date IS NOT NULL
            UNION ALL
-           SELECT 'produced', pfg.lot_number, pfg.expiry_date, p.name, p.product_code,
+           SELECT 'produced', pfg.lot_number, pfg.expiry_date, p.name, p.product_code, p.unit,
                   w.name, pfg.quantity, pb.batch_number, pb.end_date::date
            FROM production_finished_goods pfg
            JOIN production_batches pb ON pfg.batch_id = pb.id

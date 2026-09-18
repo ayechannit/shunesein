@@ -40,6 +40,8 @@ router.post('/roles/:id/permissions', verifyToken, blockOwnerRoleMutation);
 const roleRouter = createMasterRouter(roleCtrl, MANAGE_ROLES);
 roleRouter.get('/:id/permissions', roleCtrl.getRolePermissions);
 roleRouter.post('/:id/permissions', checkPermission(MANAGE_ROLES), roleCtrl.assignPermissions);
+roleRouter.get('/:id/price-levels', roleCtrl.getRolePriceLevels);
+roleRouter.post('/:id/price-levels', checkPermission(MANAGE_ROLES), roleCtrl.assignPriceLevels);
 router.use('/roles', verifyToken, roleRouter);
 
 // Permissions are a fixed catalog tied to what the backend actually
