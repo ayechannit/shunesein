@@ -22,6 +22,8 @@ import {
   PrinterIcon,
   StatTile,
   ProgressMeter,
+  PaymentProgressBar,
+  BalanceDuePill,
   SearchableSelect,
 } from '../components/masterData/MasterDataPrimitives';
 import {
@@ -383,7 +385,7 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
                     const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
                     return (
                       <tr key={index}>
-                        <td>
+                        <td data-label="Product">
                           <SearchableSelect
                             value={item.product_id || ''}
                             onChange={(newValue) => updateItem(index, 'product_id', newValue)}
@@ -392,10 +394,10 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
                             searchPlaceholder="Search products..."
                           />
                         </td>
-                        <td><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
-                        <td><input type="number" min="0" step="0.01" value={item.unit_price || ''} onChange={(e) => updateItem(index, 'unit_price', e.target.value)} /></td>
-                        <td className="item-subtotal">{formatNumber(subtotal)}</td>
-                        <td>
+                        <td data-label="Quantity"><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
+                        <td data-label="Unit Price"><input type="number" min="0" step="0.01" value={item.unit_price || ''} onChange={(e) => updateItem(index, 'unit_price', e.target.value)} /></td>
+                        <td data-label="Subtotal" className="item-subtotal">{formatNumber(subtotal)}</td>
+                        <td data-label="">
                           <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
                             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                           </button>
@@ -433,10 +435,10 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
             <tbody>
               {(viewRecord.items || []).map((item) => (
                 <tr key={item.id}>
-                  <td>{item.product_name || `Product #${item.product_id}`}</td>
-                  <td>{formatNumber(item.quantity)}</td>
-                  <td>{formatNumber(item.unit_price)}</td>
-                  <td className="item-subtotal">{formatNumber(item.subtotal)}</td>
+                  <td data-label="Product">{item.product_name || `Product #${item.product_id}`}</td>
+                  <td data-label="Quantity">{formatNumber(item.quantity)}</td>
+                  <td data-label="Unit Price">{formatNumber(item.unit_price)}</td>
+                  <td data-label="Subtotal" className="item-subtotal">{formatNumber(item.subtotal)}</td>
                 </tr>
               ))}
             </tbody>
@@ -1115,6 +1117,8 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     { key: 'tax_amount', label: 'Tax', align: 'right' },
     { key: 'net_amount', label: 'Net', align: 'right' },
     { key: 'payment_status', label: 'Payment Status' },
+    { key: 'payment_progress', label: 'Payment Progress' },
+    { key: 'balance_due', label: 'Balance Due', align: 'right' },
   ];
 
   const renderOrderCell = (row, column) => {
@@ -1142,6 +1146,20 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     }
     if (column.key === 'invoice_date') {
       return formatDate(row.invoice_date);
+    }
+    if (column.key === 'payment_progress' || column.key === 'balance_due') {
+      // What's actually still owed is net_amount minus any sales returns
+      // filed against this invoice - a return credits down what's owed the
+      // same way a payment does, so it must reduce the base the progress
+      // bar/balance are measured against, not just net_amount alone.
+      const payableAmount = Math.max(0, Number(row.net_amount || 0) - Number(row.total_returned || 0));
+      const totalPaid = Number(row.total_paid || 0);
+      if (column.key === 'payment_progress') {
+        const percent = payableAmount > 0 ? Math.min(100, (totalPaid / payableAmount) * 100) : 100;
+        return <PaymentProgressBar percent={percent} />;
+      }
+      const remaining = Math.max(0, payableAmount - totalPaid);
+      return <BalanceDuePill value={formatNumber(remaining)} due={remaining > 0} />;
     }
     return row[column.key] ?? '-';
   };

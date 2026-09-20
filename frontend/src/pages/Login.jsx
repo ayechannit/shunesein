@@ -8,6 +8,7 @@ const Login = ({ onLoginSuccess }) => {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [loggedInUser, setLoggedInUser] = useState(null);
+  const [showForgotHint, setShowForgotHint] = useState(false);
 
   const handleLogin = async (e) => {
     e.preventDefault();
@@ -93,7 +94,7 @@ const Login = ({ onLoginSuccess }) => {
           </div>
 
           <form className="login-form" onSubmit={handleLogin}>
-            {error && <div style={{ color: '#ff3b8f', textAlign: 'center', fontSize: '14px', marginBottom: '10px' }}>{error}</div>}
+            {error && <div style={{ color: 'var(--login-error)', textAlign: 'center', fontSize: '14px', marginBottom: '10px' }}>{error}</div>}
             
             <div className={`input-group ${username ? 'has-val' : ''}`}>
               <input
@@ -125,8 +126,20 @@ const Login = ({ onLoginSuccess }) => {
                 <span className="checkmark"></span>
                 Remember me
               </label>
-              <a href="#" className="forgot-link">Forgot Password?</a>
+              <button
+                type="button"
+                className="forgot-link"
+                onClick={() => setShowForgotHint(true)}
+              >
+                Forgot Password?
+              </button>
             </div>
+
+            {showForgotHint && (
+              <p className="forgot-hint">
+                Password resets aren't self-service yet — please contact your system administrator.
+              </p>
+            )}
 
             <button type="submit" className={`btn-login ${loading ? 'loading' : ''}`} disabled={loading}>
               <span className="btn-text">{loading ? 'Authenticating...' : 'Sign In'}</span>

@@ -23,6 +23,8 @@ import {
   PrinterIcon,
   StatTile,
   ProgressMeter,
+  PaymentProgressBar,
+  BalanceDuePill,
   SearchableSelect,
 } from '../components/masterData/MasterDataPrimitives';
 import {
@@ -41,6 +43,10 @@ import {
   updatePurchaseVoucher,
   deletePurchaseVoucher,
   getOrderForVoucherConversion,
+  getOrderForReceiving,
+  getOrderForReturning,
+  getVoucherForReceiving,
+  getVoucherForReturning,
   fetchPaymentMethods,
   fetchAccounts,
   createPayment,
@@ -48,11 +54,19 @@ import {
   updatePayment,
   deletePayment,
   logPrintAction,
-  fetchPurchaseReturns,
-  fetchPurchaseReturnById,
-  createPurchaseReturn,
-  updatePurchaseReturn,
-  deletePurchaseReturn,
+  fetchGoodsReceipts,
+  fetchGoodsReceiptById,
+  createGoodsReceipt,
+  deleteGoodsReceipt,
+  fetchGoodsReturns,
+  fetchGoodsReturnById,
+  createGoodsReturn,
+  deleteGoodsReturn,
+  fetchSupplierDeposits,
+  fetchSupplierDepositById,
+  fetchSupplierDepositBalance,
+  createSupplierDeposit,
+  deleteSupplierDeposit,
 } from '../services/procurementService';
 import { fetchPrintPageSetups, toPageSettings } from '../services/printSetupService';
 import { openPrintDocument } from '../utils/printDocument';
@@ -81,33 +95,64 @@ const emptyVoucherForm = () => ({
   voucher_number: '',
   po_id: '',
   supplier_id: '',
-  warehouse_id: '',
   voucher_date: today(),
   received_date: today(),
   quality_rating: 'good',
   remark: '',
   discount_amount: '0',
   tax_amount: '0',
+  // Billing only - no warehouse/lot/expiry. Receiving stock is now a
+  // separate Goods Receipt (see GoodsReceiptsTab), which can happen
+  // multiple times against one PO before or after this bill is entered.
   items: [{ product_id: '', quantity: '1', unit_price: '0' }],
 });
 
-const emptyReturnForm = () => ({
-  return_number: '',
+const emptyDepositForm = () => ({
   supplier_id: '',
+  deposit_date: today(),
+  amount: '',
+  payment_method_id: '',
+  account_id: '',
+  reference_no: '',
+  note: '',
+});
+
+const emptyReceiptForm = () => ({
+  receipt_number: '',
+  po_id: '',
+  voucher_id: '',
+  warehouse_id: '',
+  receipt_date: today(),
+  quality_rating: 'good',
+  remark: '',
+  items: [],
+});
+
+const emptyGoodsReturnForm = () => ({
+  return_number: '',
+  po_id: '',
+  voucher_id: '',
   warehouse_id: '',
   return_date: today(),
   reason: '',
-  items: [{ product_id: '', quantity: '1', unit_price: '0' }],
+  items: [],
 });
 
-// ─────────────────────────── Purchase Returns / Debit Notes ───────────────────────────
-// A deliberately standalone tab, mirroring SalesReturnsTab in Sales.jsx - a
-// return has no status workflow, so it doesn't share the isOrder-ternary
-// state the rest of this file is built around.
-const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, products, hasPermission = () => true }) => {
-  const canWrite = hasPermission('manage_purchase_returns');
-  const canEdit = hasPermission('manage_purchase_returns_edit');
-  const canDelete = hasPermission('manage_purchase_returns_delete');
+// ─────────────────────────── Goods Receipts ───────────────────────────
+// A deliberately standalone tab (like the old Purchase Returns it sits next
+// to) - receiving has no status workflow of its own, so it doesn't share
+// the isOrder-ternary state the rest of this file is built around. This is
+// the ONLY place procurement stock moves: see PurchaseController.createReceipt.
+//
+// Unlike a voucher's free-text item picker, a receipt's items are always
+// drawn from the selected PO's own lines (poItems) - you can't receive a
+// product the PO never ordered. The same PO line can be added more than
+// once (poItemOptions has no de-dup), which is what lets one ordered
+// quantity split across warehouses on one receipt (e.g. 5 units to
+// Warehouse A, 5 to Warehouse B for a line ordered at 10).
+const GoodsReceiptsTab = ({ token, onLogout, embedded, warehouses, hasPermission = () => true }) => {
+  const canWrite = hasPermission('manage_goods_receipts');
+  const canDelete = hasPermission('manage_goods_receipts_delete');
   const [rows, setRows] = useState([]);
   const [total, setTotal] = useState(0);
   const [page, setPage] = useState(1);
@@ -117,28 +162,39 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
   const [listError, setListError] = useState('');
   const [success, setSuccess] = useState('');
   const [formOpen, setFormOpen] = useState(false);
-  const [formMode, setFormMode] = useState('create');
-  const [formValues, setFormValues] = useState(emptyReturnForm());
+  const [formValues, setFormValues] = useState(emptyReceiptForm());
   const [formErrors, setFormErrors] = useState({});
   const [saving, setSaving] = useState(false);
+  // A receipt's parent is either a PO, or - for a purchase that was billed
+  // with no PO at all (a "direct" voucher, purchase_vouchers.po_id IS NULL)
+  // - the Voucher itself. Exactly one of formValues.po_id/voucher_id is ever
+  // set, chosen by this toggle; see getVoucherForReceiving on the backend.
+  const [sourceType, setSourceType] = useState('po');
+  const [eligibleOrders, setEligibleOrders] = useState([]);
+  const [eligibleVouchers, setEligibleVouchers] = useState([]);
+  const [sourceItems, setSourceItems] = useState([]);
+  const [poLoading, setPoLoading] = useState(false);
   const [viewRecord, setViewRecord] = useState(null);
   const [deleteTarget, setDeleteTarget] = useState(null);
   const [deleteError, setDeleteError] = useState('');
   const [menuOpenId, setMenuOpenId] = useState(null);
   const menuRef = useRef(null);
 
-  const productOptions = useMemo(() => products.map((p) => ({ value: String(p.id), label: p.name })), [products]);
+  const sourceItemOptions = useMemo(() => sourceItems.map((i) => ({
+    value: String(i.id),
+    label: `${i.product_name || `Product #${i.product_id}`} (${formatNumber(i.remaining_qty)} remaining)`,
+  })), [sourceItems]);
 
   const load = async () => {
     setLoading(true);
     setListError('');
     try {
-      const response = await fetchPurchaseReturns(token, { page, limit: pageSize, search });
+      const response = await fetchGoodsReceipts(token, { page, limit: pageSize, search });
       setRows(response.data || []);
       setTotal(Number(response.total || 0));
     } catch (error) {
       if (error.status === 401) return onLogout();
-      setListError(error.message || 'Unable to load purchase returns');
+      setListError(error.message || 'Unable to load goods receipts');
     } finally {
       setLoading(false);
     }
@@ -154,58 +210,116 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
     return () => document.removeEventListener('mousedown', handleOutside);
   }, []);
 
+  const loadEligibleOrders = async () => {
+    try {
+      const response = await fetchPurchaseOrders(token, { page: 1, limit: 1000, search: '', sortBy: 'id', order: 'DESC' });
+      setEligibleOrders((response.data || []).filter((o) => o.status === 'approved' || o.status === 'partially_received'));
+    } catch {
+      // Non-fatal - the PO dropdown just stays empty and the form's own
+      // error banner covers the actual submit failure.
+    }
+  };
+
+  // Direct vouchers (po_id IS NULL) are the alternate parent - see
+  // getVoucherForReceiving. Not pre-filtered by remaining quantity (same as
+  // eligibleOrders isn't); a fully-received voucher just shows no
+  // outstanding lines once selected.
+  const loadEligibleVouchers = async () => {
+    try {
+      const response = await fetchPurchaseVouchers(token, { page: 1, limit: 1000, search: '', sortBy: 'id', order: 'DESC' });
+      setEligibleVouchers((response.data || []).filter((v) => !v.po_id));
+    } catch {
+      // Non-fatal - the Voucher dropdown just stays empty and the form's own
+      // error banner covers the actual submit failure.
+    }
+  };
+
   const updateItem = (index, key, value) => {
     const nextItems = [...formValues.items];
     nextItems[index] = { ...nextItems[index], [key]: value };
     setFormValues((previous) => ({ ...previous, items: nextItems }));
   };
-  const addItem = () => setFormValues((previous) => ({ ...previous, items: [...previous.items, { product_id: '', quantity: '1', unit_price: '0' }] }));
+  const addItem = () => setFormValues((previous) => ({ ...previous, items: [...previous.items, { po_item_id: '', voucher_item_id: '', product_id: '', quantity: '', warehouse_id: '', lot_number: '', expiry_date: '' }] }));
   const removeItem = (index) => setFormValues((previous) => ({ ...previous, items: previous.items.filter((_, i) => i !== index) }));
 
-  const summaryTotal = (formValues.items || []).reduce((sum, item) => sum + Number(item.quantity || 0) * Number(item.unit_price || 0), 0);
-
-  const openCreate = () => {
-    setFormMode('create');
-    setFormValues(emptyReturnForm());
-    setFormErrors({});
-    setFormOpen(true);
+  const selectSourceItem = (index, lineId) => {
+    const line = sourceItems.find((i) => String(i.id) === String(lineId));
+    const nextItems = [...formValues.items];
+    nextItems[index] = {
+      ...nextItems[index],
+      po_item_id: sourceType === 'po' ? lineId : '',
+      voucher_item_id: sourceType === 'voucher' ? lineId : '',
+      product_id: line ? String(line.product_id) : '',
+      quantity: line ? String(line.remaining_qty) : '',
+    };
+    setFormValues((previous) => ({ ...previous, items: nextItems }));
   };
 
-  const handleEdit = async (row) => {
-    setMenuOpenId(null);
+  const openCreate = () => {
+    setFormValues(emptyReceiptForm());
+    setSourceType('po');
+    setSourceItems([]);
+    setFormErrors({});
+    setFormOpen(true);
+    loadEligibleOrders();
+    loadEligibleVouchers();
+  };
+
+  const handleSourceTypeChange = (type) => {
+    setSourceType(type);
+    setFormValues((previous) => ({ ...previous, po_id: '', voucher_id: '', warehouse_id: '', items: [] }));
+    setSourceItems([]);
+    setFormErrors({});
+  };
+
+  const handleSelectSource = async (id) => {
+    const isVoucher = sourceType === 'voucher';
+    setFormValues((previous) => ({
+      ...previous,
+      po_id: isVoucher ? '' : id,
+      voucher_id: isVoucher ? id : '',
+      warehouse_id: '',
+      items: [],
+    }));
+    setFormErrors({});
+    if (!id) { setSourceItems([]); return; }
+    setPoLoading(true);
     try {
-      const full = await fetchPurchaseReturnById(token, row.id);
-      setFormMode('edit');
-      setFormValues({
-        id: full.id,
-        return_number: full.return_number,
-        supplier_id: full.supplier_id ? String(full.supplier_id) : '',
-        warehouse_id: full.warehouse_id ? String(full.warehouse_id) : '',
-        return_date: full.return_date ? full.return_date.slice(0, 10) : today(),
-        reason: full.reason || '',
-        items: (full.items || []).map((item) => ({
-          product_id: String(item.product_id),
-          quantity: String(item.quantity),
-          unit_price: String(item.unit_price),
+      const data = isVoucher ? await getVoucherForReceiving(token, id) : await getOrderForReceiving(token, id);
+      const outstanding = (data.items || []).filter((i) => Number(i.remaining_qty) > 0);
+      setSourceItems(outstanding);
+      setFormValues((previous) => ({
+        ...previous,
+        items: outstanding.map((line) => ({
+          po_item_id: isVoucher ? '' : String(line.id),
+          voucher_item_id: isVoucher ? String(line.id) : '',
+          product_id: String(line.product_id),
+          quantity: String(line.remaining_qty),
+          warehouse_id: '',
+          lot_number: '',
+          expiry_date: '',
         })),
-      });
-      setFormErrors({});
-      setFormOpen(true);
+      }));
     } catch (error) {
       if (error.status === 401) return onLogout();
-      setListError(error.message || 'Unable to load return for editing');
+      setFormErrors({ submit: error.message || 'Unable to load that source document' });
+      setSourceItems([]);
+    } finally {
+      setPoLoading(false);
     }
   };
 
   const submitForm = async () => {
     const nextErrors = {};
-    if (!formValues.supplier_id) nextErrors.supplier_id = 'Supplier is required.';
+    if (sourceType === 'po' && !formValues.po_id) nextErrors.po_id = 'Purchase order is required.';
+    if (sourceType === 'voucher' && !formValues.voucher_id) nextErrors.voucher_id = 'Voucher is required.';
     if (!formValues.warehouse_id) nextErrors.warehouse_id = 'Warehouse is required.';
     if (!formValues.items || formValues.items.length === 0) nextErrors.items = 'At least one item is required.';
     (formValues.items || []).forEach((item, index) => {
-      if (!item.product_id) nextErrors[`item-product-${index}`] = 'Product is required.';
+      const lineId = sourceType === 'po' ? item.po_item_id : item.voucher_item_id;
+      if (!lineId) nextErrors[`item-product-${index}`] = 'Product is required.';
       if (!item.quantity || Number(item.quantity) <= 0) nextErrors[`item-quantity-${index}`] = 'Quantity must be greater than 0.';
-      if (!item.unit_price || Number(item.unit_price) <= 0) nextErrors[`item-price-${index}`] = 'Price must be greater than 0.';
+      if (!item.warehouse_id && !formValues.warehouse_id) nextErrors[`item-warehouse-${index}`] = 'Warehouse is required.';
     });
     if (Object.keys(nextErrors).length > 0) {
       setFormErrors(nextErrors);
@@ -217,32 +331,31 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
     setListError('');
     try {
       const payload = {
-        ...formValues,
-        return_number: formValues.return_number || `PR-${Date.now()}`,
-        return_date: formValues.return_date || new Date().toISOString().slice(0, 10),
-        supplier_id: Number(formValues.supplier_id),
-        warehouse_id: Number(formValues.warehouse_id),
+        receipt_number: formValues.receipt_number || `GR-${Date.now()}`,
+        po_id: sourceType === 'po' ? Number(formValues.po_id) : null,
+        voucher_id: sourceType === 'voucher' ? Number(formValues.voucher_id) : null,
+        receipt_date: formValues.receipt_date || new Date().toISOString().slice(0, 10),
+        quality_rating: formValues.quality_rating,
+        remark: formValues.remark,
         items: formValues.items.map((item) => ({
-          ...item,
+          po_item_id: sourceType === 'po' ? Number(item.po_item_id) : null,
+          voucher_item_id: sourceType === 'voucher' ? Number(item.voucher_item_id) : null,
           product_id: Number(item.product_id),
           quantity: Number(item.quantity),
-          unit_price: Number(item.unit_price),
+          warehouse_id: Number(item.warehouse_id || formValues.warehouse_id),
+          lot_number: item.lot_number || null,
+          expiry_date: item.expiry_date || null,
         })),
       };
-      if (formMode === 'edit') {
-        await updatePurchaseReturn(token, formValues.id, payload);
-        setSuccess('Purchase return updated.');
-      } else {
-        await createPurchaseReturn(token, payload);
-        setSuccess('Purchase return recorded.');
-      }
+      await createGoodsReceipt(token, payload);
+      setSuccess('Goods receipt recorded.');
       setFormOpen(false);
-      setFormValues(emptyReturnForm());
+      setFormValues(emptyReceiptForm());
       setPage(1);
       await load();
     } catch (error) {
       if (error.status === 401) return onLogout();
-      setFormErrors({ submit: error.message || 'Unable to save return' });
+      setFormErrors({ submit: error.message || 'Unable to save goods receipt' });
     } finally {
       setSaving(false);
     }
@@ -251,10 +364,10 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
   const handleView = async (row) => {
     setMenuOpenId(null);
     try {
-      setViewRecord(await fetchPurchaseReturnById(token, row.id));
+      setViewRecord(await fetchGoodsReceiptById(token, row.id));
     } catch (error) {
       if (error.status === 401) return onLogout();
-      setListError(error.message || 'Unable to load return detail');
+      setListError(error.message || 'Unable to load receipt detail');
     }
   };
 
@@ -262,35 +375,36 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
     setSaving(true);
     setDeleteError('');
     try {
-      await deletePurchaseReturn(token, deleteTarget.id);
-      setSuccess('Purchase return deleted.');
+      await deleteGoodsReceipt(token, deleteTarget.id);
+      setSuccess('Goods receipt deleted.');
       setDeleteTarget(null);
       await load();
     } catch (error) {
       if (error.status === 401) return onLogout();
-      setDeleteError(error.message || 'Unable to delete return');
+      setDeleteError(error.message || 'Unable to delete goods receipt');
     } finally {
       setSaving(false);
     }
   };
 
   const columns = [
-    { key: 'return_number', label: 'Return Number' },
+    { key: 'receipt_number', label: 'Receipt Number' },
+    { key: 'source_number', label: 'Source Document' },
     { key: 'supplier_name', label: 'Supplier' },
     { key: 'warehouse_name', label: 'Warehouse' },
-    { key: 'return_date', label: 'Return Date' },
-    { key: 'total_amount', label: 'Total Amount', align: 'right' },
+    { key: 'receipt_date', label: 'Receipt Date' },
   ];
 
   const renderCell = (row, column) => {
-    if (column.key === 'return_date') return formatDate(row.return_date);
-    if (column.key === 'total_amount') return formatNumber(row.total_amount);
+    if (column.key === 'receipt_date') return formatDate(row.receipt_date);
+    if (column.key === 'warehouse_name') return Number(row.warehouse_count) > 1 ? `Multiple (${row.warehouse_count})` : (row.warehouse_name || '-');
+    if (column.key === 'source_number') return row.source_number ? (row.po_number ? `PO: ${row.source_number}` : `Voucher: ${row.source_number}`) : '-';
     return row[column.key] ?? '-';
   };
 
   const content = (
     <div className="procurement-shell">
-      {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Procurement', 'Purchase Returns']} title="Purchase Returns" description="Record goods sent back to a supplier - stock goes out, and what we owe them drops." actions={null} /> : null}
+      {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Procurement', 'Goods Receipts']} title="Goods Receipts" description="Record what actually arrived against a purchase order (or a voucher billed with no PO) - stock only moves here, not on the bill." actions={null} /> : null}
       {success ? (
         <div className="status-banner status-banner-success" style={{ marginBottom: '1rem' }}>
           <span>{success}</span>
@@ -313,7 +427,7 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
           extraActions={(
             <>
               <AppButton variant="secondary" onClick={load} iconLeft={<RefreshIcon className="button-icon" />}>Refresh</AppButton>
-              {canWrite ? <AppButton variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="button-icon" />}>New Return</AppButton> : null}
+              {canWrite ? <AppButton variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="button-icon" />}>New Goods Receipt</AppButton> : null}
             </>
           )}
         />
@@ -326,14 +440,13 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
         renderRowActions={(row) => (
           <div className="dropdown-menu-list">
             <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
-            {canEdit ? <button type="button" className="dropdown-menu-item" onClick={() => handleEdit(row)}><PencilIcon className="menu-icon" /><span>Edit</span></button> : null}
             {canDelete ? <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button> : null}
           </div>
         )}
         menuOpenId={menuOpenId}
         onToggleMenu={setMenuOpenId}
         menuRef={menuRef}
-        emptyState={<EmptyState title="No purchase returns" description="Nothing has been returned to a supplier yet." actionLabel={canWrite ? 'New Return' : undefined} onAction={canWrite ? openCreate : undefined} />}
+        emptyState={<EmptyState title="No goods receipts yet" description="Receive goods against an approved purchase order to see it here." actionLabel={canWrite ? 'New Goods Receipt' : undefined} onAction={canWrite ? openCreate : undefined} />}
         renderCell={renderCell}
       />
       <Pagination
@@ -350,64 +463,108 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
       {formOpen ? (
         <MasterModal
           size="wide"
-          title={formMode === 'edit' ? 'Edit Purchase Return' : 'New Purchase Return'}
-          description="Record what's going back to the supplier."
+          title="New Goods Receipt"
+          description="Record what actually arrived for a purchase order or a voucher billed with no PO."
           onClose={() => setFormOpen(false)}
           footer={(
             <>
               <button type="button" className="master-button master-button-secondary" onClick={() => setFormOpen(false)}>Cancel</button>
-              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : (formMode === 'edit' ? 'Update Return' : 'Save Return')}</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving || poLoading}>{saving ? 'Saving...' : 'Save Goods Receipt'}</button>
             </>
           )}
         >
           <div className="procurement-shell">
             {formErrors.submit ? <div className="status-banner status-banner-error">{formErrors.submit}</div> : null}
             <div className="procurement-grid">
-              <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
-              <FormField field={{ key: 'warehouse_id', label: 'Return-from Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
-              <FormField field={{ key: 'return_date', label: 'Return Date', type: 'date' }} value={formValues.return_date} error={formErrors.return_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
-              <FormField field={{ key: 'reason', label: 'Reason', type: 'textarea' }} value={formValues.reason} error={formErrors.reason} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+              <FormField
+                field={{ key: 'sourceType', label: 'Source Type', type: 'select', required: true }}
+                value={sourceType}
+                onChange={(key, value) => handleSourceTypeChange(value)}
+                options={[
+                  { value: 'po', label: 'Purchase Order' },
+                  { value: 'voucher', label: 'Voucher (no PO)' },
+                ]}
+              />
+              {sourceType === 'po' ? (
+                <FormField
+                  field={{ key: 'po_id', label: 'Purchase Order', type: 'select', required: true, placeholder: 'Select an approved order' }}
+                  value={formValues.po_id}
+                  error={formErrors.po_id}
+                  onChange={(key, value) => handleSelectSource(value)}
+                  options={eligibleOrders.map((o) => ({ value: o.id, label: `${o.po_number} - ${o.supplier_name || 'Unknown supplier'}` }))}
+                />
+              ) : (
+                <FormField
+                  field={{ key: 'voucher_id', label: 'Voucher', type: 'select', required: true, placeholder: 'Select a voucher billed with no PO' }}
+                  value={formValues.voucher_id}
+                  error={formErrors.voucher_id}
+                  onChange={(key, value) => handleSelectSource(value)}
+                  options={eligibleVouchers.map((v) => ({ value: v.id, label: `${v.voucher_number} - ${v.supplier_name || 'Unknown supplier'}` }))}
+                />
+              )}
+              <FormField field={{ key: 'warehouse_id', label: 'Default Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'receipt_date', label: 'Receipt Date', type: 'date' }} value={formValues.receipt_date} error={formErrors.receipt_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+              <FormField
+                field={{ key: 'quality_rating', label: 'Quality Rating', type: 'select', placeholder: 'Select rating' }}
+                value={formValues.quality_rating}
+                error={formErrors.quality_rating}
+                onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))}
+                options={[
+                  { value: 'good', label: 'Good' },
+                  { value: 'minor_issues', label: 'Minor Issues' },
+                  { value: 'rejected', label: 'Rejected' },
+                ]}
+              />
+              <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
             </div>
 
             <div className="procurement-card">
               <div className="procurement-toolbar">
                 <strong>Items</strong>
-                <AppButton variant="secondary" onClick={addItem}>Add Item</AppButton>
+                <AppButton variant="secondary" onClick={addItem} disabled={sourceType === 'po' ? !formValues.po_id : !formValues.voucher_id}>Add Item</AppButton>
               </div>
               {formErrors.items ? <div className="status-banner status-banner-error">{formErrors.items}</div> : null}
-              <table className="procurement-items-table">
-                <thead><tr><th>Product</th><th>Quantity</th><th>Unit Price</th><th>Subtotal</th><th></th></tr></thead>
-                <tbody>
-                  {(formValues.items || []).map((item, index) => {
-                    const subtotal = Number(item.quantity || 0) * Number(item.unit_price || 0);
-                    return (
-                      <tr key={index}>
-                        <td>
-                          <SearchableSelect
-                            value={item.product_id || ''}
-                            onChange={(newValue) => updateItem(index, 'product_id', newValue)}
-                            options={productOptions}
-                            placeholder="Select product"
-                            searchPlaceholder="Search products..."
-                          />
-                        </td>
-                        <td><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
-                        <td><input type="number" min="0" step="0.01" value={item.unit_price || ''} onChange={(e) => updateItem(index, 'unit_price', e.target.value)} /></td>
-                        <td className="item-subtotal">{formatNumber(subtotal)}</td>
-                        <td>
-                          <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
-                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-                          </button>
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-
-            <div className="procurement-summary">
-              <div className="procurement-summary-row"><span>Total</span><strong>{formatNumber(summaryTotal)}</strong></div>
+              {(sourceType === 'po' ? !formValues.po_id : !formValues.voucher_id) ? (
+                <p className="payment-history-empty">Select a {sourceType === 'po' ? 'purchase order' : 'voucher'} above to load its outstanding lines.</p>
+              ) : poLoading ? (
+                <div className="status-banner">Loading source lines...</div>
+              ) : (
+                <table className="procurement-items-table has-warehouse-lot-expiry">
+                  <thead><tr><th>Product</th><th className="col-qty">Quantity</th><th className="col-warehouse">Warehouse</th><th className="col-lot">Lot #</th><th className="col-expiry">Expiry Date</th><th></th></tr></thead>
+                  <tbody>
+                    {(formValues.items || []).map((item, index) => {
+                      const effectiveWarehouseId = item.warehouse_id || formValues.warehouse_id || '';
+                      const lineId = sourceType === 'po' ? item.po_item_id : item.voucher_item_id;
+                      return (
+                        <tr key={index}>
+                          <td data-label="Product">
+                            <select value={lineId || ''} onChange={(e) => selectSourceItem(index, e.target.value)}>
+                              <option value="" disabled>Select item</option>
+                              {sourceItemOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                            </select>
+                            {formErrors[`item-product-${index}`] ? <div className="field-error">{formErrors[`item-product-${index}`]}</div> : null}
+                          </td>
+                          <td data-label="Quantity" className="col-qty"><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
+                          <td data-label="Warehouse" className="col-warehouse">
+                            <select value={effectiveWarehouseId} onChange={(e) => updateItem(index, 'warehouse_id', e.target.value)}>
+                              <option value="" disabled>Select warehouse</option>
+                              {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                            </select>
+                            {formErrors[`item-warehouse-${index}`] ? <div className="field-error">{formErrors[`item-warehouse-${index}`]}</div> : null}
+                          </td>
+                          <td data-label="Lot #" className="col-lot"><input type="text" value={item.lot_number || ''} onChange={(e) => updateItem(index, 'lot_number', e.target.value)} placeholder="Optional" /></td>
+                          <td data-label="Expiry Date" className="col-expiry"><input type="date" value={item.expiry_date || ''} onChange={(e) => updateItem(index, 'expiry_date', e.target.value)} /></td>
+                          <td data-label="">
+                            <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
             </div>
           </div>
         </MasterModal>
@@ -416,26 +573,27 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
       {viewRecord ? (
         <MasterModal
           size="wide"
-          title={`Purchase Return: ${viewRecord.return_number}`}
-          description={`Supplier: ${viewRecord.supplier_name || '-'}`}
+          title={`Goods Receipt: ${viewRecord.receipt_number}`}
+          description={`${viewRecord.po_number ? 'Purchase Order' : 'Voucher'}: ${viewRecord.source_number || '-'} - Supplier: ${viewRecord.supplier_name || '-'}`}
           onClose={() => setViewRecord(null)}
           footer={<button type="button" className="master-button master-button-secondary" onClick={() => setViewRecord(null)}>Close</button>}
         >
           <div className="detail-grid">
-            <div className="detail-item"><span className="detail-label">Warehouse</span><span className="detail-value">{viewRecord.warehouse_name || '-'}</span></div>
-            <div className="detail-item"><span className="detail-label">Return Date</span><span className="detail-value">{formatDate(viewRecord.return_date)}</span></div>
-            <div className="detail-item"><span className="detail-label">Original Voucher</span><span className="detail-value">{viewRecord.voucher_number || '-'}</span></div>
-            <div className="detail-item"><span className="detail-label">Reason</span><span className="detail-value">{viewRecord.reason || '-'}</span></div>
+            <div className="detail-item"><span className="detail-label">Receipt Date</span><span className="detail-value">{formatDate(viewRecord.receipt_date)}</span></div>
+            <div className="detail-item"><span className="detail-label">Quality Rating</span><span className="detail-value">{viewRecord.quality_rating || '-'}</span></div>
+            {viewRecord.created_by_name && <div className="detail-item"><span className="detail-label">Created by</span><span className="detail-value">{viewRecord.created_by_name}</span></div>}
+            {viewRecord.remark && <div className="detail-item detail-item-full"><span className="detail-label">Remark</span><span className="detail-value">{viewRecord.remark}</span></div>}
           </div>
           <table className="procurement-items-table" style={{ marginTop: '1rem' }}>
-            <thead><tr><th>Product</th><th>Quantity</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+            <thead><tr><th>Product</th><th>Quantity</th><th>Warehouse</th><th>Lot #</th><th>Expiry Date</th></tr></thead>
             <tbody>
               {(viewRecord.items || []).map((item) => (
                 <tr key={item.id}>
-                  <td>{item.product_name || `Product #${item.product_id}`}</td>
-                  <td>{formatNumber(item.quantity)}</td>
-                  <td>{formatNumber(item.unit_price)}</td>
-                  <td className="item-subtotal">{formatNumber(item.subtotal)}</td>
+                  <td data-label="Product">{item.product_name || `Product #${item.product_id}`}</td>
+                  <td data-label="Quantity">{formatNumber(item.quantity)}</td>
+                  <td data-label="Warehouse">{item.warehouse_name || '-'}</td>
+                  <td data-label="Lot #">{item.lot_number || '-'}</td>
+                  <td data-label="Expiry Date">{item.expiry_date ? formatDate(item.expiry_date) : '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -445,8 +603,755 @@ const PurchaseReturnsTab = ({ token, onLogout, embedded, suppliers, warehouses, 
 
       {deleteTarget ? (
         <ConfirmDialog
-          title="Delete Purchase Return?"
+          title="Delete Goods Receipt?"
+          description={`Are you sure you want to delete ${deleteTarget.receipt_number}? This reverses the stock effect and reopens the purchase order for receiving. This action cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
+          onConfirm={handleDeleteConfirm}
+          loading={saving}
+          error={deleteError}
+        />
+      ) : null}
+    </div>
+  );
+
+  if (embedded) return content;
+  return <div className="master-shell"><main className="master-content">{content}</main></div>;
+};
+
+// ─────────────────────────── Goods Returns ───────────────────────────
+// Near-identical to GoodsReceiptsTab (PO picker -> its own lines), inverted:
+// caps each line at what's been received-but-not-yet-returned rather than
+// ordered-but-not-yet-received, and eligible orders include 'received' POs
+// too (a fully-received order can still have goods returned from it later).
+const GoodsReturnsTab = ({ token, onLogout, embedded, warehouses, hasPermission = () => true }) => {
+  const canWrite = hasPermission('manage_goods_returns');
+  const canDelete = hasPermission('manage_goods_returns_delete');
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [formOpen, setFormOpen] = useState(false);
+  const [formValues, setFormValues] = useState(emptyGoodsReturnForm());
+  const [formErrors, setFormErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  // Same PO-or-direct-voucher parent choice as GoodsReceiptsTab - see
+  // getVoucherForReturning on the backend.
+  const [sourceType, setSourceType] = useState('po');
+  const [eligibleOrders, setEligibleOrders] = useState([]);
+  const [eligibleVouchers, setEligibleVouchers] = useState([]);
+  const [sourceItems, setSourceItems] = useState([]);
+  const [poLoading, setPoLoading] = useState(false);
+  const [viewRecord, setViewRecord] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const menuRef = useRef(null);
+
+  const sourceItemOptions = useMemo(() => sourceItems.map((i) => ({
+    value: String(i.id),
+    label: `${i.product_name || `Product #${i.product_id}`} (${formatNumber(i.returnable_qty)} returnable)`,
+  })), [sourceItems]);
+
+  const summaryTotal = (formValues.items || []).reduce((sum, item) => {
+    const lineId = sourceType === 'po' ? item.po_item_id : item.voucher_item_id;
+    const line = sourceItems.find((i) => String(i.id) === String(lineId));
+    return sum + Number(item.quantity || 0) * Number(line?.unit_price || 0);
+  }, 0);
+
+  const load = async () => {
+    setLoading(true);
+    setListError('');
+    try {
+      const response = await fetchGoodsReturns(token, { page, limit: pageSize, search });
+      setRows(response.data || []);
+      setTotal(Number(response.total || 0));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load goods returns');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [token, page, pageSize]);
+
+  useEffect(() => {
+    const handleOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpenId(null);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const loadEligibleOrders = async () => {
+    try {
+      const response = await fetchPurchaseOrders(token, { page: 1, limit: 1000, search: '', sortBy: 'id', order: 'DESC' });
+      setEligibleOrders((response.data || []).filter((o) => o.status === 'approved' || o.status === 'partially_received' || o.status === 'received'));
+    } catch {
+      // Non-fatal - the PO dropdown just stays empty.
+    }
+  };
+
+  const loadEligibleVouchers = async () => {
+    try {
+      const response = await fetchPurchaseVouchers(token, { page: 1, limit: 1000, search: '', sortBy: 'id', order: 'DESC' });
+      setEligibleVouchers((response.data || []).filter((v) => !v.po_id));
+    } catch {
+      // Non-fatal - the Voucher dropdown just stays empty.
+    }
+  };
+
+  const updateItem = (index, key, value) => {
+    const nextItems = [...formValues.items];
+    nextItems[index] = { ...nextItems[index], [key]: value };
+    setFormValues((previous) => ({ ...previous, items: nextItems }));
+  };
+  const addItem = () => setFormValues((previous) => ({ ...previous, items: [...previous.items, { po_item_id: '', voucher_item_id: '', product_id: '', quantity: '', warehouse_id: '' }] }));
+  const removeItem = (index) => setFormValues((previous) => ({ ...previous, items: previous.items.filter((_, i) => i !== index) }));
+
+  const selectSourceItem = (index, lineId) => {
+    const line = sourceItems.find((i) => String(i.id) === String(lineId));
+    const nextItems = [...formValues.items];
+    nextItems[index] = {
+      ...nextItems[index],
+      po_item_id: sourceType === 'po' ? lineId : '',
+      voucher_item_id: sourceType === 'voucher' ? lineId : '',
+      product_id: line ? String(line.product_id) : '',
+      quantity: line ? String(line.returnable_qty) : '',
+    };
+    setFormValues((previous) => ({ ...previous, items: nextItems }));
+  };
+
+  const openCreate = () => {
+    setFormValues(emptyGoodsReturnForm());
+    setSourceType('po');
+    setSourceItems([]);
+    setFormErrors({});
+    setFormOpen(true);
+    loadEligibleOrders();
+    loadEligibleVouchers();
+  };
+
+  const handleSourceTypeChange = (type) => {
+    setSourceType(type);
+    setFormValues((previous) => ({ ...previous, po_id: '', voucher_id: '', warehouse_id: '', items: [] }));
+    setSourceItems([]);
+    setFormErrors({});
+  };
+
+  const handleSelectSource = async (id) => {
+    const isVoucher = sourceType === 'voucher';
+    setFormValues((previous) => ({
+      ...previous,
+      po_id: isVoucher ? '' : id,
+      voucher_id: isVoucher ? id : '',
+      warehouse_id: '',
+      items: [],
+    }));
+    setFormErrors({});
+    if (!id) { setSourceItems([]); return; }
+    setPoLoading(true);
+    try {
+      const data = isVoucher ? await getVoucherForReturning(token, id) : await getOrderForReturning(token, id);
+      const returnable = (data.items || []).filter((i) => Number(i.returnable_qty) > 0);
+      setSourceItems(returnable);
+      setFormValues((previous) => ({ ...previous, items: [] }));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setFormErrors({ submit: error.message || 'Unable to load that source document' });
+      setSourceItems([]);
+    } finally {
+      setPoLoading(false);
+    }
+  };
+
+  const submitForm = async () => {
+    const nextErrors = {};
+    if (sourceType === 'po' && !formValues.po_id) nextErrors.po_id = 'Purchase order is required.';
+    if (sourceType === 'voucher' && !formValues.voucher_id) nextErrors.voucher_id = 'Voucher is required.';
+    if (!formValues.warehouse_id) nextErrors.warehouse_id = 'Warehouse is required.';
+    if (!formValues.items || formValues.items.length === 0) nextErrors.items = 'At least one item is required.';
+    (formValues.items || []).forEach((item, index) => {
+      const lineId = sourceType === 'po' ? item.po_item_id : item.voucher_item_id;
+      if (!lineId) nextErrors[`item-product-${index}`] = 'Product is required.';
+      if (!item.quantity || Number(item.quantity) <= 0) nextErrors[`item-quantity-${index}`] = 'Quantity must be greater than 0.';
+      if (!item.warehouse_id && !formValues.warehouse_id) nextErrors[`item-warehouse-${index}`] = 'Warehouse is required.';
+    });
+    if (Object.keys(nextErrors).length > 0) {
+      setFormErrors(nextErrors);
+      return;
+    }
+
+    setSaving(true);
+    setSuccess('');
+    setListError('');
+    try {
+      const payload = {
+        return_number: formValues.return_number || `GRT-${Date.now()}`,
+        po_id: sourceType === 'po' ? Number(formValues.po_id) : null,
+        voucher_id: sourceType === 'voucher' ? Number(formValues.voucher_id) : null,
+        return_date: formValues.return_date || new Date().toISOString().slice(0, 10),
+        reason: formValues.reason,
+        items: formValues.items.map((item) => ({
+          po_item_id: sourceType === 'po' ? Number(item.po_item_id) : null,
+          voucher_item_id: sourceType === 'voucher' ? Number(item.voucher_item_id) : null,
+          product_id: Number(item.product_id),
+          quantity: Number(item.quantity),
+          warehouse_id: Number(item.warehouse_id || formValues.warehouse_id),
+        })),
+      };
+      await createGoodsReturn(token, payload);
+      setSuccess('Goods return recorded.');
+      setFormOpen(false);
+      setFormValues(emptyGoodsReturnForm());
+      setPage(1);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setFormErrors({ submit: error.message || 'Unable to save goods return' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleView = async (row) => {
+    setMenuOpenId(null);
+    try {
+      setViewRecord(await fetchGoodsReturnById(token, row.id));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load return detail');
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    setSaving(true);
+    setDeleteError('');
+    try {
+      await deleteGoodsReturn(token, deleteTarget.id);
+      setSuccess('Goods return deleted.');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setDeleteError(error.message || 'Unable to delete goods return');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const columns = [
+    { key: 'return_number', label: 'Return Number' },
+    { key: 'source_number', label: 'Source Document' },
+    { key: 'supplier_name', label: 'Supplier' },
+    { key: 'warehouse_name', label: 'Warehouse' },
+    { key: 'return_date', label: 'Return Date' },
+    { key: 'total_amount', label: 'Total Amount', align: 'right' },
+  ];
+
+  const renderCell = (row, column) => {
+    if (column.key === 'return_date') return formatDate(row.return_date);
+    if (column.key === 'total_amount') return formatNumber(row.total_amount);
+    if (column.key === 'warehouse_name') return Number(row.warehouse_count) > 1 ? `Multiple (${row.warehouse_count})` : (row.warehouse_name || '-');
+    if (column.key === 'source_number') return row.source_number ? (row.po_number ? `PO: ${row.source_number}` : `Voucher: ${row.source_number}`) : '-';
+    return row[column.key] ?? '-';
+  };
+
+  const content = (
+    <div className="procurement-shell">
+      {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Procurement', 'Goods Returns']} title="Goods Returns" description="Send previously-received goods back to a supplier against a purchase order or a voucher billed with no PO." actions={null} /> : null}
+      {success ? (
+        <div className="status-banner status-banner-success" style={{ marginBottom: '1rem' }}>
+          <span>{success}</span>
+          <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => setSuccess('')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      ) : null}
+      {listError ? <div className="status-banner status-banner-error" style={{ marginBottom: '1rem' }}>{listError}</div> : null}
+
+      <div className="procurement-toolbar">
+        <SearchToolbar
+          searchValue={search}
+          onSearchValueChange={setSearch}
+          onSubmit={() => { setPage(1); load(); }}
+          onReset={() => { setSearch(''); setPage(1); }}
+          sortValue="id-desc"
+          onSortChange={() => {}}
+          sortOptions={[{ value: 'id-desc', label: 'Newest First' }]}
+          extraActions={(
+            <>
+              <AppButton variant="secondary" onClick={load} iconLeft={<RefreshIcon className="button-icon" />}>Refresh</AppButton>
+              {canWrite ? <AppButton variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="button-icon" />}>New Goods Return</AppButton> : null}
+            </>
+          )}
+        />
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        renderRowActions={(row) => (
+          <div className="dropdown-menu-list">
+            <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
+            {canDelete ? <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button> : null}
+          </div>
+        )}
+        menuOpenId={menuOpenId}
+        onToggleMenu={setMenuOpenId}
+        menuRef={menuRef}
+        emptyState={<EmptyState title="No goods returns yet" description="Nothing has been returned to a supplier yet." actionLabel={canWrite ? 'New Goods Return' : undefined} onAction={canWrite ? openCreate : undefined} />}
+        renderCell={renderCell}
+      />
+      <Pagination
+        page={page}
+        totalPages={Math.max(1, Math.ceil(total / pageSize))}
+        totalItems={total}
+        pageSize={pageSize}
+        pageSizeOptions={PAGE_SIZES}
+        onPageSizeChange={(v) => { setPage(1); setPageSize(v); }}
+        onPrev={() => setPage(Math.max(1, page - 1))}
+        onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))}
+      />
+
+      {formOpen ? (
+        <MasterModal
+          size="wide"
+          title="New Goods Return"
+          description="Send received goods back to the supplier."
+          onClose={() => setFormOpen(false)}
+          footer={(
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={() => setFormOpen(false)}>Cancel</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving || poLoading}>{saving ? 'Saving...' : 'Save Goods Return'}</button>
+            </>
+          )}
+        >
+          <div className="procurement-shell">
+            {formErrors.submit ? <div className="status-banner status-banner-error">{formErrors.submit}</div> : null}
+            <div className="procurement-grid">
+              <FormField
+                field={{ key: 'sourceType', label: 'Source Type', type: 'select', required: true }}
+                value={sourceType}
+                onChange={(key, value) => handleSourceTypeChange(value)}
+                options={[
+                  { value: 'po', label: 'Purchase Order' },
+                  { value: 'voucher', label: 'Voucher (no PO)' },
+                ]}
+              />
+              {sourceType === 'po' ? (
+                <FormField
+                  field={{ key: 'po_id', label: 'Purchase Order', type: 'select', required: true, placeholder: 'Select an order' }}
+                  value={formValues.po_id}
+                  error={formErrors.po_id}
+                  onChange={(key, value) => handleSelectSource(value)}
+                  options={eligibleOrders.map((o) => ({ value: o.id, label: `${o.po_number} - ${o.supplier_name || 'Unknown supplier'}` }))}
+                />
+              ) : (
+                <FormField
+                  field={{ key: 'voucher_id', label: 'Voucher', type: 'select', required: true, placeholder: 'Select a voucher billed with no PO' }}
+                  value={formValues.voucher_id}
+                  error={formErrors.voucher_id}
+                  onChange={(key, value) => handleSelectSource(value)}
+                  options={eligibleVouchers.map((v) => ({ value: v.id, label: `${v.voucher_number} - ${v.supplier_name || 'Unknown supplier'}` }))}
+                />
+              )}
+              <FormField field={{ key: 'warehouse_id', label: 'Default Return-from Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'return_date', label: 'Return Date', type: 'date' }} value={formValues.return_date} error={formErrors.return_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+              <FormField field={{ key: 'reason', label: 'Reason', type: 'textarea' }} value={formValues.reason} error={formErrors.reason} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+            </div>
+
+            <div className="procurement-card">
+              <div className="procurement-toolbar">
+                <strong>Items</strong>
+                <AppButton variant="secondary" onClick={addItem} disabled={sourceType === 'po' ? !formValues.po_id : !formValues.voucher_id}>Add Item</AppButton>
+              </div>
+              {formErrors.items ? <div className="status-banner status-banner-error">{formErrors.items}</div> : null}
+              {(sourceType === 'po' ? !formValues.po_id : !formValues.voucher_id) ? (
+                <p className="payment-history-empty">Select a {sourceType === 'po' ? 'purchase order' : 'voucher'} above to load what's available to return.</p>
+              ) : poLoading ? (
+                <div className="status-banner">Loading source lines...</div>
+              ) : (
+                <table className="procurement-items-table has-warehouse">
+                  <thead><tr><th>Product</th><th className="col-qty">Quantity</th><th className="col-warehouse">Warehouse</th><th></th></tr></thead>
+                  <tbody>
+                    {(formValues.items || []).map((item, index) => {
+                      const effectiveWarehouseId = item.warehouse_id || formValues.warehouse_id || '';
+                      const lineId = sourceType === 'po' ? item.po_item_id : item.voucher_item_id;
+                      return (
+                        <tr key={index}>
+                          <td data-label="Product">
+                            <select value={lineId || ''} onChange={(e) => selectSourceItem(index, e.target.value)}>
+                              <option value="" disabled>Select item</option>
+                              {sourceItemOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
+                            </select>
+                            {formErrors[`item-product-${index}`] ? <div className="field-error">{formErrors[`item-product-${index}`]}</div> : null}
+                          </td>
+                          <td data-label="Quantity" className="col-qty"><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
+                          <td data-label="Warehouse" className="col-warehouse">
+                            <select value={effectiveWarehouseId} onChange={(e) => updateItem(index, 'warehouse_id', e.target.value)}>
+                              <option value="" disabled>Select warehouse</option>
+                              {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                            </select>
+                            {formErrors[`item-warehouse-${index}`] ? <div className="field-error">{formErrors[`item-warehouse-${index}`]}</div> : null}
+                          </td>
+                          <td data-label="">
+                            <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
+                              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                            </button>
+                          </td>
+                        </tr>
+                      );
+                    })}
+                  </tbody>
+                </table>
+              )}
+            </div>
+
+            <div className="procurement-summary">
+              <div className="procurement-summary-row"><span>Estimated Total</span><strong>{formatNumber(summaryTotal)}</strong></div>
+            </div>
+          </div>
+        </MasterModal>
+      ) : null}
+
+      {viewRecord ? (
+        <MasterModal
+          size="wide"
+          title={`Goods Return: ${viewRecord.return_number}`}
+          description={`${viewRecord.po_number ? 'Purchase Order' : 'Voucher'}: ${viewRecord.source_number || '-'} - Supplier: ${viewRecord.supplier_name || '-'}`}
+          onClose={() => setViewRecord(null)}
+          footer={<button type="button" className="master-button master-button-secondary" onClick={() => setViewRecord(null)}>Close</button>}
+        >
+          <div className="detail-grid">
+            <div className="detail-item"><span className="detail-label">Return Date</span><span className="detail-value">{formatDate(viewRecord.return_date)}</span></div>
+            <div className="detail-item"><span className="detail-label">Total Amount</span><span className="detail-value">{formatNumber(viewRecord.total_amount)}</span></div>
+            <div className="detail-item"><span className="detail-label">Reason</span><span className="detail-value">{viewRecord.reason || '-'}</span></div>
+          </div>
+          <table className="procurement-items-table" style={{ marginTop: '1rem' }}>
+            <thead><tr><th>Product</th><th>Quantity</th><th>Warehouse</th><th>Unit Price</th><th>Subtotal</th></tr></thead>
+            <tbody>
+              {(viewRecord.items || []).map((item) => (
+                <tr key={item.id}>
+                  <td data-label="Product">{item.product_name || `Product #${item.product_id}`}</td>
+                  <td data-label="Quantity">{formatNumber(item.quantity)}</td>
+                  <td data-label="Warehouse">{item.warehouse_name || '-'}</td>
+                  <td data-label="Unit Price">{formatNumber(item.unit_price)}</td>
+                  <td data-label="Subtotal" className="item-subtotal">{formatNumber(item.subtotal)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </MasterModal>
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete Goods Return?"
           description={`Are you sure you want to delete ${deleteTarget.return_number}? This reverses the stock and balance effect. This action cannot be undone.`}
+          confirmLabel="Delete"
+          onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
+          onConfirm={handleDeleteConfirm}
+          loading={saving}
+          error={deleteError}
+        />
+      ) : null}
+    </div>
+  );
+
+  if (embedded) return content;
+  return <div className="master-shell"><main className="master-content">{content}</main></div>;
+};
+
+// ─────────────────────────── Supplier Deposits ───────────────────────────
+// Advance payments held against a supplier, separate from the voucher/
+// payment workflow above - a deposit can later be drawn on from a purchase
+// voucher's "Record new payment" form (see the deposit_id branch there)
+// instead of paying by cash/bank. Standalone tab, same convention as
+// GoodsReceiptsTab/GoodsReturnsTab.
+const SupplierDepositsTab = ({ token, onLogout, embedded, suppliers, hasPermission = () => true }) => {
+  const canWrite = hasPermission('manage_supplier_deposits');
+  const canDelete = hasPermission('manage_supplier_deposits_delete');
+  const [rows, setRows] = useState([]);
+  const [total, setTotal] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageSize, setPageSize] = useState(10);
+  const [search, setSearch] = useState('');
+  const [loading, setLoading] = useState(false);
+  const [listError, setListError] = useState('');
+  const [success, setSuccess] = useState('');
+  const [formOpen, setFormOpen] = useState(false);
+  const [formValues, setFormValues] = useState(emptyDepositForm());
+  const [formErrors, setFormErrors] = useState({});
+  const [saving, setSaving] = useState(false);
+  const [viewRecord, setViewRecord] = useState(null);
+  const [deleteTarget, setDeleteTarget] = useState(null);
+  const [deleteError, setDeleteError] = useState('');
+  const [menuOpenId, setMenuOpenId] = useState(null);
+  const menuRef = useRef(null);
+  const [paymentMethods, setPaymentMethods] = useState([]);
+  const [accounts, setAccounts] = useState([]);
+
+  const load = async () => {
+    setLoading(true);
+    setListError('');
+    try {
+      const response = await fetchSupplierDeposits(token, { page, limit: pageSize, search });
+      setRows(response.data || []);
+      setTotal(Number(response.total || 0));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load supplier deposits');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [token, page, pageSize]);
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const [methods, accountsList] = await Promise.all([fetchPaymentMethods(token), fetchAccounts(token)]);
+        // The 'Supplier Deposit' method is a system label used only when a
+        // purchase payment DRAWS from a deposit - it's never a valid way to
+        // fund a new deposit itself, so it's excluded here.
+        setPaymentMethods(methods.filter((m) => m.code !== 'SUPPLIER_DEPOSIT'));
+        setAccounts(accountsList);
+      } catch {
+        // ignore - form will just show empty dropdowns
+      }
+    })();
+  }, [token]);
+
+  useEffect(() => {
+    const handleOutside = (event) => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpenId(null);
+    };
+    document.addEventListener('mousedown', handleOutside);
+    return () => document.removeEventListener('mousedown', handleOutside);
+  }, []);
+
+  const openCreate = () => {
+    setFormValues(emptyDepositForm());
+    setFormErrors({});
+    setFormOpen(true);
+  };
+
+  const submitForm = async () => {
+    const nextErrors = {};
+    if (!formValues.supplier_id) nextErrors.supplier_id = 'Supplier is required.';
+    if (!formValues.amount || Number(formValues.amount) <= 0) nextErrors.amount = 'Amount must be greater than 0.';
+    if (!formValues.payment_method_id) nextErrors.payment_method_id = 'Payment method is required.';
+    if (Object.keys(nextErrors).length > 0) {
+      setFormErrors(nextErrors);
+      return;
+    }
+
+    setSaving(true);
+    setSuccess('');
+    setListError('');
+    try {
+      await createSupplierDeposit(token, {
+        supplier_id: Number(formValues.supplier_id),
+        deposit_date: formValues.deposit_date || today(),
+        amount: Number(formValues.amount),
+        payment_method_id: Number(formValues.payment_method_id),
+        account_id: formValues.account_id ? Number(formValues.account_id) : undefined,
+        reference_no: formValues.reference_no,
+        note: formValues.note,
+      });
+      setSuccess('Supplier deposit recorded.');
+      setFormOpen(false);
+      setFormValues(emptyDepositForm());
+      setPage(1);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setFormErrors({ submit: error.message || 'Unable to record deposit' });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleView = async (row) => {
+    setMenuOpenId(null);
+    try {
+      setViewRecord(await fetchSupplierDepositById(token, row.id));
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setListError(error.message || 'Unable to load deposit detail');
+    }
+  };
+
+  const handleDeleteConfirm = async () => {
+    setSaving(true);
+    setDeleteError('');
+    try {
+      await deleteSupplierDeposit(token, deleteTarget.id);
+      setSuccess('Supplier deposit deleted.');
+      setDeleteTarget(null);
+      await load();
+    } catch (error) {
+      if (error.status === 401) return onLogout();
+      setDeleteError(error.message || 'Unable to delete deposit');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const columns = [
+    { key: 'supplier_name', label: 'Supplier' },
+    { key: 'deposit_date', label: 'Deposit Date' },
+    { key: 'amount', label: 'Amount', align: 'right' },
+    { key: 'used_amount', label: 'Used', align: 'right' },
+    { key: 'remaining_amount', label: 'Remaining', align: 'right' },
+    { key: 'reference_no', label: 'Reference' },
+  ];
+
+  const renderCell = (row, column) => {
+    if (column.key === 'deposit_date') return formatDate(row.deposit_date);
+    if (column.key === 'amount' || column.key === 'used_amount' || column.key === 'remaining_amount') return formatNumber(row[column.key]);
+    return row[column.key] ?? '-';
+  };
+
+  const content = (
+    <div className="procurement-shell">
+      {!embedded ? <PageHeader breadcrumb={['Dashboard', 'Procurement', 'Supplier Deposits']} title="Supplier Deposits" description="Pay a supplier in advance, then optionally draw the deposit down from a purchase voucher's payment screen instead of paying by cash/bank." actions={null} /> : null}
+      {success ? (
+        <div className="status-banner status-banner-success" style={{ marginBottom: '1rem' }}>
+          <span>{success}</span>
+          <button type="button" className="status-banner-close" aria-label="Dismiss" onClick={() => setSuccess('')}>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+          </button>
+        </div>
+      ) : null}
+      {listError ? <div className="status-banner status-banner-error" style={{ marginBottom: '1rem' }}>{listError}</div> : null}
+
+      <div className="procurement-toolbar">
+        <SearchToolbar
+          searchValue={search}
+          onSearchValueChange={setSearch}
+          onSubmit={() => { setPage(1); load(); }}
+          onReset={() => { setSearch(''); setPage(1); }}
+          sortValue="id-desc"
+          onSortChange={() => {}}
+          sortOptions={[{ value: 'id-desc', label: 'Newest First' }]}
+          extraActions={(
+            <>
+              <AppButton variant="secondary" onClick={load} iconLeft={<RefreshIcon className="button-icon" />}>Refresh</AppButton>
+              {canWrite ? <AppButton variant="primary" onClick={openCreate} iconLeft={<PlusIcon className="button-icon" />}>New Deposit</AppButton> : null}
+            </>
+          )}
+        />
+      </div>
+
+      <DataTable
+        columns={columns}
+        rows={rows}
+        loading={loading}
+        renderRowActions={(row) => (
+          <div className="dropdown-menu-list">
+            <button type="button" className="dropdown-menu-item" onClick={() => handleView(row)}><EyeIcon className="menu-icon" /><span>View</span></button>
+            {canDelete ? <button type="button" className="dropdown-menu-item danger" onClick={() => { setMenuOpenId(null); setDeleteTarget(row); }}><TrashIcon className="menu-icon" /><span>Delete</span></button> : null}
+          </div>
+        )}
+        menuOpenId={menuOpenId}
+        onToggleMenu={setMenuOpenId}
+        menuRef={menuRef}
+        emptyState={<EmptyState title="No supplier deposits" description="Record a deposit to pay a supplier in advance." actionLabel={canWrite ? 'New Deposit' : undefined} onAction={canWrite ? openCreate : undefined} />}
+        renderCell={renderCell}
+      />
+      <Pagination
+        page={page}
+        totalPages={Math.max(1, Math.ceil(total / pageSize))}
+        totalItems={total}
+        pageSize={pageSize}
+        pageSizeOptions={PAGE_SIZES}
+        onPageSizeChange={(v) => { setPage(1); setPageSize(v); }}
+        onPrev={() => setPage(Math.max(1, page - 1))}
+        onNext={() => setPage(Math.min(Math.max(1, Math.ceil(total / pageSize)), page + 1))}
+      />
+
+      {formOpen ? (
+        <MasterModal
+          title="New Supplier Deposit"
+          description="Pay a supplier in advance, before any purchase voucher exists to apply it against."
+          onClose={() => setFormOpen(false)}
+          footer={(
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={() => setFormOpen(false)}>Cancel</button>
+              <button type="button" className="master-button master-button-primary" onClick={submitForm} disabled={saving}>{saving ? 'Saving...' : 'Save Deposit'}</button>
+            </>
+          )}
+        >
+          <div className="procurement-shell">
+            {formErrors.submit ? <div className="status-banner status-banner-error">{formErrors.submit}</div> : null}
+            <div className="procurement-grid">
+              <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
+              <FormField field={{ key: 'deposit_date', label: 'Deposit Date', type: 'date' }} value={formValues.deposit_date} error={formErrors.deposit_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+              <FormField field={{ key: 'amount', label: 'Amount', type: 'number', required: true, placeholder: '0.00' }} value={formValues.amount} error={formErrors.amount} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+              <FormField field={{ key: 'payment_method_id', label: 'Payment Method', type: 'select', required: true, placeholder: 'Select method' }} value={formValues.payment_method_id} error={formErrors.payment_method_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={paymentMethods.map((m) => ({ value: m.id, label: m.name }))} />
+              <FormField field={{ key: 'account_id', label: 'Account', type: 'select', placeholder: 'Select account' }} value={formValues.account_id} error={formErrors.account_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={accounts.map((a) => ({ value: a.id, label: a.name }))} />
+              <FormField field={{ key: 'reference_no', label: 'Reference No', type: 'text', placeholder: 'e.g. CHECK-001' }} value={formValues.reference_no} error={formErrors.reference_no} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+              <FormField field={{ key: 'note', label: 'Note', type: 'textarea', placeholder: 'Optional note' }} value={formValues.note} error={formErrors.note} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+            </div>
+          </div>
+        </MasterModal>
+      ) : null}
+
+      {viewRecord ? (
+        <MasterModal
+          title={`Supplier Deposit #${viewRecord.id}`}
+          description={`Supplier: ${viewRecord.supplier_name || '-'}`}
+          onClose={() => setViewRecord(null)}
+          footer={<button type="button" className="master-button master-button-secondary" onClick={() => setViewRecord(null)}>Close</button>}
+        >
+          <div className="stat-tile-row">
+            <StatTile label="Deposit amount" value={formatNumber(viewRecord.amount)} />
+            <StatTile label="Used" value={formatNumber(viewRecord.used_amount)} />
+            <StatTile label="Remaining" value={formatNumber(viewRecord.remaining_amount)} tone={Number(viewRecord.remaining_amount) > 0 ? 'success' : 'warning'} />
+          </div>
+          <div className="detail-grid" style={{ marginTop: '1rem' }}>
+            <div className="detail-item"><span className="detail-label">Deposit Date</span><span className="detail-value">{formatDate(viewRecord.deposit_date)}</span></div>
+            <div className="detail-item"><span className="detail-label">Payment Method</span><span className="detail-value">{viewRecord.method_name || '-'}</span></div>
+            <div className="detail-item"><span className="detail-label">Account</span><span className="detail-value">{viewRecord.account_name || '-'}</span></div>
+            <div className="detail-item"><span className="detail-label">Reference</span><span className="detail-value">{viewRecord.reference_no || '-'}</span></div>
+            {viewRecord.note ? <div className="detail-item detail-item-full"><span className="detail-label">Note</span><span className="detail-value">{viewRecord.note}</span></div> : null}
+          </div>
+
+          <div className="procurement-card" style={{ marginTop: '1rem' }}>
+            <strong>Applied to purchases</strong>
+            {(viewRecord.applications || []).length > 0 ? (
+              <table className="procurement-items-table" style={{ marginTop: '8px' }}>
+                <thead><tr><th>Date</th><th>Voucher</th><th>Amount</th></tr></thead>
+                <tbody>
+                  {viewRecord.applications.map((application) => (
+                    <tr key={application.id}>
+                      <td>{formatDate(application.payment_date)}</td>
+                      <td>{application.voucher_number || `#${application.transaction_id}`}</td>
+                      <td>{formatNumber(application.amount)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            ) : (
+              <p className="payment-history-empty">Not applied to any purchase yet.</p>
+            )}
+          </div>
+        </MasterModal>
+      ) : null}
+
+      {deleteTarget ? (
+        <ConfirmDialog
+          title="Delete Supplier Deposit?"
+          description={`Are you sure you want to delete this deposit for ${deleteTarget.supplier_name}? Only possible while it hasn't been applied to any purchase payment. This action cannot be undone.`}
           confirmLabel="Delete"
           onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
           onConfirm={handleDeleteConfirm}
@@ -511,7 +1416,8 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [payments, setPayments] = useState([]);
-  const [paymentForm, setPaymentForm] = useState({ payment_method_id: '', amount: '', payment_date: new Date().toISOString().slice(0, 10), reference_no: '', bank_name: '', note: '', account_id: '' });
+  const [paymentForm, setPaymentForm] = useState({ payment_method_id: '', amount: '', payment_date: new Date().toISOString().slice(0, 10), reference_no: '', bank_name: '', note: '', account_id: '', fund_source: 'cash', deposit_id: '' });
+  const [availableDeposits, setAvailableDeposits] = useState([]);
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState('');
@@ -682,7 +1588,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
       });
     } else {
       if (!formValues.supplier_id) nextErrors.supplier_id = 'Supplier is required.';
-      if (!formValues.warehouse_id) nextErrors.warehouse_id = 'Warehouse is required.';
       if (!formValues.items || formValues.items.length === 0) nextErrors.items = 'At least one item is required.';
       formValues.items.forEach((item, index) => {
         if (!item.product_id) nextErrors[`item-product-${index}`] = 'Product is required.';
@@ -817,7 +1722,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
         voucher_number: row.voucher_number || '',
         po_id: String(row.po_id || ''),
         supplier_id: String(row.supplier_id || ''),
-        warehouse_id: String(row.warehouse_id || ''),
         voucher_date: row.voucher_date ? String(row.voucher_date).slice(0, 10) : '',
         received_date: row.received_date ? String(row.received_date).slice(0, 10) : '',
         quality_rating: row.quality_rating || 'good',
@@ -835,8 +1739,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
                 product_id: String(item.product_id),
                 quantity: String(item.quantity),
                 unit_price: String(item.unit_price),
-                lot_number: item.lot_number || '',
-                expiry_date: item.expiry_date ? String(item.expiry_date).slice(0, 10) : '',
               })),
             }));
           }
@@ -939,7 +1841,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
         voucher_number: `PV-${Date.now()}`,
         po_id: String(orderData.id || ''),
         supplier_id: String(orderData.supplier_id || ''),
-        warehouse_id: '',
         voucher_date: new Date().toISOString().slice(0, 10),
         remark: orderData.remark || '',
         discount_amount: '0',
@@ -954,7 +1855,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
       setFormOpen(true);
 
       // Switch to vouchers tab via defaultTab won't work, but the form will be for vouchers
-      setSuccess('Order items loaded for voucher creation. Fill in warehouse and submit.');
+      setSuccess('Order items loaded for billing. This does not receive goods - use Goods Receipts for that.');
     } catch (error) {
       if (error.status === 401) {
         onLogout();
@@ -999,7 +1900,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
         partyName: data.supplier_name || '-',
         date: isOrder ? data.order_date : data.voucher_date,
         statusLabel: isOrder ? data.status : data.payment_status,
-        extraMeta: !isOrder ? [{ label: 'Warehouse', value: data.warehouse_name }] : [],
         items,
         totals,
         remark: data.remark,
@@ -1073,13 +1973,14 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
   const voucherColumns = [
     { key: 'voucher_number', label: 'Voucher Number', sortable: true },
     { key: 'supplier_name', label: 'Supplier' },
-    { key: 'warehouse_name', label: 'Warehouse' },
     { key: 'voucher_date', label: 'Voucher Date' },
     { key: 'total_amount', label: 'Total', align: 'right' },
     { key: 'discount_amount', label: 'Discount', align: 'right' },
     { key: 'tax_amount', label: 'Tax', align: 'right' },
     { key: 'net_amount', label: 'Net', align: 'right' },
     { key: 'payment_status', label: 'Payment Status' },
+    { key: 'payment_progress', label: 'Payment Progress' },
+    { key: 'balance_due', label: 'Balance Due', align: 'right' },
   ];
 
   const renderOrderCell = (row, column) => {
@@ -1107,6 +2008,20 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
     }
     if (column.key === 'voucher_date') {
       return formatDate(row.voucher_date);
+    }
+    if (column.key === 'payment_progress' || column.key === 'balance_due') {
+      // What's actually still payable is net_amount minus any purchase
+      // returns filed against this voucher - a return credits down what's
+      // owed the same way a payment does, so it must reduce the base the
+      // progress bar/balance are measured against, not just net_amount alone.
+      const payableAmount = Math.max(0, Number(row.net_amount || 0) - Number(row.total_returned || 0));
+      const totalPaid = Number(row.total_paid || 0);
+      if (column.key === 'payment_progress') {
+        const percent = payableAmount > 0 ? Math.min(100, (totalPaid / payableAmount) * 100) : 100;
+        return <PaymentProgressBar percent={percent} />;
+      }
+      const remaining = Math.max(0, payableAmount - totalPaid);
+      return <BalanceDuePill value={formatNumber(remaining)} due={remaining > 0} />;
     }
     return row[column.key] ?? '-';
   };
@@ -1168,7 +2083,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
               <>
                 <FormField field={{ key: 'voucher_number', label: 'Voucher Number', type: 'text', readOnly: true }} value={formValues.voucher_number || `PV-${Date.now()}`} error={formErrors.voucher_number} onChange={() => {}} />
                 <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
-                <FormField field={{ key: 'warehouse_id', label: 'Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
                 <FormField field={{ key: 'voucher_date', label: 'Voucher Date', type: 'date' }} value={formValues.voucher_date} error={formErrors.voucher_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'received_date', label: 'Received Date', type: 'date' }} value={formValues.received_date} error={formErrors.received_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField
@@ -1194,18 +2108,12 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
             </div>
             {formErrors.items ? <div className="status-banner status-banner-error">{formErrors.items}</div> : null}
             <div className="procurement-items-table-wrap">
-              <table className={`procurement-items-table ${isOrder ? '' : 'has-lot-expiry'}`.trim()}>
+              <table className="procurement-items-table">
                 <thead>
                   <tr>
                     <th>Product</th>
                     <th className="col-qty">Quantity</th>
                     <th className="col-price">Unit Price</th>
-                    {isOrder ? null : (
-                      <>
-                        <th className="col-lot">Lot #</th>
-                        <th className="col-expiry">Expiry Date</th>
-                      </>
-                    )}
                     <th className="col-subtotal">Subtotal</th>
                     <th></th>
                   </tr>
@@ -1232,16 +2140,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
                         <td data-label="Unit Price" className="col-price">
                           <input type="number" min="1" step="0.01" value={item.unit_price || ''} onChange={(event) => updateItem(index, 'unit_price', event.target.value)} />
                         </td>
-                        {isOrder ? null : (
-                          <>
-                            <td data-label="Lot #" className="col-lot">
-                              <input type="text" value={item.lot_number || ''} onChange={(event) => updateItem(index, 'lot_number', event.target.value)} placeholder="Optional" />
-                            </td>
-                            <td data-label="Expiry Date" className="col-expiry">
-                              <input type="date" value={item.expiry_date || ''} onChange={(event) => updateItem(index, 'expiry_date', event.target.value)} />
-                            </td>
-                          </>
-                        )}
                         <td data-label="Subtotal" className="col-subtotal item-subtotal">{formatNumber(subtotal)}</td>
                         <td data-label="">
                           <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
@@ -1311,7 +2209,9 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
         fetchPaymentMethods(token),
         fetchAccounts(token),
       ]);
-      setPaymentMethods(methods);
+      // 'Supplier Deposit' is a system label applied automatically when
+      // fund_source is 'deposit' below - it's never picked directly.
+      setPaymentMethods(methods.filter((m) => m.code !== 'SUPPLIER_DEPOSIT'));
       setAccounts(accountsList);
     } catch {
       // ignore
@@ -1328,11 +2228,27 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
     }
   };
 
+  // Load the supplier's available deposit balance, so "pay from deposit" can
+  // be offered as an alternative to cash/bank on this voucher's payment form.
+  const loadAvailableDeposits = async (supplierId) => {
+    if (!supplierId) {
+      setAvailableDeposits([]);
+      return;
+    }
+    try {
+      const response = await fetchSupplierDepositBalance(token, supplierId);
+      setAvailableDeposits(response.deposits || []);
+    } catch {
+      setAvailableDeposits([]);
+    }
+  };
+
   // Loads payment lookups + history whenever a voucher is opened in the view modal.
   useEffect(() => {
     if (viewRecord && defaultTab === 'vouchers') {
       loadPaymentLookups();
       loadVoucherPayments(viewRecord.id);
+      loadAvailableDeposits(viewRecord.supplier_id);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewRecord, defaultTab]);
@@ -1342,10 +2258,14 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
     if (!viewRecord) return null;
     const isOrder = defaultTab === 'orders';
 
+    const usingDeposit = paymentForm.fund_source === 'deposit';
+    const selectedDeposit = availableDeposits.find((d) => String(d.id) === String(paymentForm.deposit_id));
+    const depositAvailable = selectedDeposit ? Number(selectedDeposit.remaining_amount) : 0;
+
     // Record payment
     const handleRecordPayment = async () => {
-      if (!viewRecord || !paymentForm.payment_method_id || !paymentForm.amount) {
-        setPaymentError('Payment method and amount are required.');
+      if (!viewRecord || !paymentForm.amount || (usingDeposit ? !paymentForm.deposit_id : !paymentForm.payment_method_id)) {
+        setPaymentError(usingDeposit ? 'A deposit and amount are required.' : 'Payment method and amount are required.');
         return;
       }
 
@@ -1358,6 +2278,10 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
         setPaymentError(`Payment cannot exceed the remaining balance of ${formatNumber(remaining)}.`);
         return;
       }
+      if (usingDeposit && amountValue > depositAvailable + 0.01) {
+        setPaymentError(`Payment cannot exceed the deposit's available balance of ${formatNumber(depositAvailable)}.`);
+        return;
+      }
 
       setPaymentLoading(true);
       setPaymentError('');
@@ -1366,20 +2290,25 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
         await createPayment(token, {
           transaction_type: 'purchase',
           transaction_id: viewRecord.id,
-          payment_method_id: Number(paymentForm.payment_method_id),
           amount: Number(paymentForm.amount),
           payment_date: paymentForm.payment_date,
           reference_no: paymentForm.reference_no,
           bank_name: paymentForm.bank_name,
           note: paymentForm.note,
-          account_id: paymentForm.account_id ? Number(paymentForm.account_id) : undefined,
+          ...(usingDeposit
+            ? { deposit_id: Number(paymentForm.deposit_id) }
+            : {
+                payment_method_id: Number(paymentForm.payment_method_id),
+                account_id: paymentForm.account_id ? Number(paymentForm.account_id) : undefined,
+              }),
         });
 
         setPaymentSuccess('Payment recorded successfully.');
-        setPaymentForm({ payment_method_id: '', amount: '', payment_date: new Date().toISOString().slice(0, 10), reference_no: '', bank_name: '', note: '', account_id: '' });
+        setPaymentForm({ payment_method_id: '', amount: '', payment_date: new Date().toISOString().slice(0, 10), reference_no: '', bank_name: '', note: '', account_id: '', fund_source: 'cash', deposit_id: '' });
         await loadVoucherPayments(viewRecord.id);
         const updated = await fetchPurchaseVoucherById(token, viewRecord.id);
         setViewRecord(updated);
+        await loadAvailableDeposits(viewRecord.supplier_id);
         // Keep the vouchers table in sync so payment_status doesn't look stale after closing the dialog.
         await loadVouchers();
       } catch (error) {
@@ -1404,27 +2333,34 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
         bank_name: payment.bank_name || '',
         note: payment.note || '',
         account_id: payment.account_id ? String(payment.account_id) : '',
+        // The funding source (cash/bank account vs. supplier deposit) is
+        // fixed at creation and can't be changed here - see PaymentController.update.
+        fundedByDeposit: !!payment.deposit_id,
       });
       setPaymentEditError('');
     };
 
     const handleEditPaymentSave = async () => {
       if (!paymentEditTarget || !paymentEditForm) return;
-      if (!paymentEditForm.payment_method_id || !paymentEditForm.amount) {
+      if (!paymentEditForm.fundedByDeposit && (!paymentEditForm.payment_method_id || !paymentEditForm.amount)) {
         setPaymentEditError('Payment method and amount are required.');
+        return;
+      }
+      if (paymentEditForm.fundedByDeposit && !paymentEditForm.amount) {
+        setPaymentEditError('Amount is required.');
         return;
       }
       setPaymentEditLoading(true);
       setPaymentEditError('');
       try {
         await updatePayment(token, paymentEditTarget.id, {
-          payment_method_id: Number(paymentEditForm.payment_method_id),
+          payment_method_id: paymentEditForm.fundedByDeposit ? undefined : Number(paymentEditForm.payment_method_id),
           amount: Number(paymentEditForm.amount),
           payment_date: paymentEditForm.payment_date,
           reference_no: paymentEditForm.reference_no,
           bank_name: paymentEditForm.bank_name,
           note: paymentEditForm.note,
-          account_id: paymentEditForm.account_id ? Number(paymentEditForm.account_id) : undefined,
+          account_id: paymentEditForm.fundedByDeposit ? undefined : (paymentEditForm.account_id ? Number(paymentEditForm.account_id) : undefined),
         });
         setPaymentEditTarget(null);
         setPaymentEditForm(null);
@@ -1432,6 +2368,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
         await loadVoucherPayments(viewRecord.id);
         const updated = await fetchPurchaseVoucherById(token, viewRecord.id);
         setViewRecord(updated);
+        await loadAvailableDeposits(viewRecord.supplier_id);
         await loadVouchers();
       } catch (error) {
         if (error.status === 401) {
@@ -1514,12 +2451,6 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
             </div>
 
             <div className="detail-grid">
-              {!isOrder && (
-                <div className="detail-item">
-                  <span className="detail-label">Warehouse</span>
-                  <span className="detail-value">{viewRecord.warehouse_name || '-'}</span>
-                </div>
-              )}
               <div className="detail-item">
                 <span className="detail-label">Total amount</span>
                 <span className="detail-value">{formatNumber(viewRecord.total_amount)}</span>
@@ -1649,37 +2580,79 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
                         </button>
                       </div>
                     ) : null}
-                    <div className="procurement-grid">
-                      <div className="form-field">
-                        <label>Payment Method *</label>
-                        <select value={paymentForm.payment_method_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
-                          <option value="">Select method</option>
-                          {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
-                        </select>
+
+                    {availableDeposits.length > 0 ? (
+                      <div className="fund-source-toggle" style={{ display: 'flex', gap: '16px', marginBottom: '12px' }}>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'normal' }}>
+                          <input
+                            type="radio"
+                            name="fund_source"
+                            checked={!usingDeposit}
+                            onChange={() => setPaymentForm((prev) => ({ ...prev, fund_source: 'cash', deposit_id: '' }))}
+                          />
+                          Pay by cash / bank
+                        </label>
+                        <label style={{ display: 'flex', alignItems: 'center', gap: '6px', fontWeight: 'normal' }}>
+                          <input
+                            type="radio"
+                            name="fund_source"
+                            checked={usingDeposit}
+                            onChange={() => setPaymentForm((prev) => ({ ...prev, fund_source: 'deposit', payment_method_id: '', account_id: '' }))}
+                          />
+                          Reduce from supplier deposit
+                        </label>
                       </div>
+                    ) : null}
+
+                    <div className="procurement-grid">
+                      {usingDeposit ? (
+                        <div className="form-field">
+                          <label>Deposit *</label>
+                          <select value={paymentForm.deposit_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, deposit_id: e.target.value }))}>
+                            <option value="">Select deposit</option>
+                            {availableDeposits.map((deposit) => (
+                              <option key={deposit.id} value={deposit.id}>
+                                {(deposit.reference_no || `Deposit #${deposit.id}`)} - {formatNumber(deposit.remaining_amount)} available
+                              </option>
+                            ))}
+                          </select>
+                        </div>
+                      ) : (
+                        <div className="form-field">
+                          <label>Payment Method *</label>
+                          <select value={paymentForm.payment_method_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
+                            <option value="">Select method</option>
+                            {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
+                          </select>
+                        </div>
+                      )}
                       <div className="form-field">
-                        <label>Amount * (max {formatNumber(remaining)})</label>
-                        <input type="number" min="0.01" max={remaining} step="0.01" value={paymentForm.amount} onChange={(e) => setPaymentForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="0.00" />
+                        <label>Amount * (max {formatNumber(usingDeposit ? Math.min(remaining, depositAvailable) : remaining)})</label>
+                        <input type="number" min="0.01" max={usingDeposit ? Math.min(remaining, depositAvailable) : remaining} step="0.01" value={paymentForm.amount} onChange={(e) => setPaymentForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="0.00" />
                       </div>
                       <div className="form-field">
                         <label>Payment Date</label>
                         <input type="date" value={paymentForm.payment_date} onChange={(e) => setPaymentForm((prev) => ({ ...prev, payment_date: e.target.value }))} />
                       </div>
-                      <div className="form-field">
-                        <label>Account</label>
-                        <select value={paymentForm.account_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, account_id: e.target.value }))}>
-                          <option value="">Select account</option>
-                          {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-                        </select>
-                      </div>
+                      {!usingDeposit ? (
+                        <div className="form-field">
+                          <label>Account</label>
+                          <select value={paymentForm.account_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, account_id: e.target.value }))}>
+                            <option value="">Select account</option>
+                            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                          </select>
+                        </div>
+                      ) : null}
                       <div className="form-field">
                         <label>Reference No</label>
                         <input type="text" value={paymentForm.reference_no} onChange={(e) => setPaymentForm((prev) => ({ ...prev, reference_no: e.target.value }))} placeholder="e.g. CHECK-001" />
                       </div>
-                      <div className="form-field">
-                        <label>Bank Name</label>
-                        <input type="text" value={paymentForm.bank_name} onChange={(e) => setPaymentForm((prev) => ({ ...prev, bank_name: e.target.value }))} placeholder="e.g. KBZ Bank" />
-                      </div>
+                      {!usingDeposit ? (
+                        <div className="form-field">
+                          <label>Bank Name</label>
+                          <input type="text" value={paymentForm.bank_name} onChange={(e) => setPaymentForm((prev) => ({ ...prev, bank_name: e.target.value }))} placeholder="e.g. KBZ Bank" />
+                        </div>
+                      ) : null}
                       <div className="form-field form-field-full">
                         <label>Note</label>
                         <input type="text" value={paymentForm.note} onChange={(e) => setPaymentForm((prev) => ({ ...prev, note: e.target.value }))} placeholder="Optional note" />
@@ -1731,14 +2704,24 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
           )}
         >
           {paymentEditError ? <div className="status-banner status-banner-error">{paymentEditError}</div> : null}
+          {paymentEditForm.fundedByDeposit ? (
+            <div className="status-banner">Funded from a supplier deposit - the funding source can't be changed, only the amount/date/reference/note.</div>
+          ) : null}
           <div className="procurement-grid">
-            <div className="form-field">
-              <label>Payment Method *</label>
-              <select value={paymentEditForm.payment_method_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
-                <option value="">Select method</option>
-                {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
-              </select>
-            </div>
+            {paymentEditForm.fundedByDeposit ? (
+              <div className="form-field">
+                <label>Funding Source</label>
+                <input type="text" value="Supplier Deposit" disabled />
+              </div>
+            ) : (
+              <div className="form-field">
+                <label>Payment Method *</label>
+                <select value={paymentEditForm.payment_method_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
+                  <option value="">Select method</option>
+                  {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
+                </select>
+              </div>
+            )}
             <div className="form-field">
               <label>Amount *</label>
               <input type="number" min="0.01" step="0.01" value={paymentEditForm.amount} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, amount: e.target.value }))} placeholder="0.00" />
@@ -1747,13 +2730,15 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
               <label>Payment Date</label>
               <input type="date" value={paymentEditForm.payment_date} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, payment_date: e.target.value }))} />
             </div>
-            <div className="form-field">
-              <label>Account</label>
-              <select value={paymentEditForm.account_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, account_id: e.target.value }))}>
-                <option value="">Select account</option>
-                {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-              </select>
-            </div>
+            {!paymentEditForm.fundedByDeposit ? (
+              <div className="form-field">
+                <label>Account</label>
+                <select value={paymentEditForm.account_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, account_id: e.target.value }))}>
+                  <option value="">Select account</option>
+                  {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
+                </select>
+              </div>
+            ) : null}
             <div className="form-field">
               <label>Reference No</label>
               <input type="text" value={paymentEditForm.reference_no} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, reference_no: e.target.value }))} placeholder="e.g. CHECK-001" />
@@ -1962,8 +2947,16 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
     );
   };
 
-  if (defaultTab === 'returns') {
-    return <PurchaseReturnsTab token={token} onLogout={onLogout} embedded={embedded} suppliers={suppliers} warehouses={warehouses} products={products} hasPermission={hasPermission} />;
+  if (defaultTab === 'goods-receipts') {
+    return <GoodsReceiptsTab token={token} onLogout={onLogout} embedded={embedded} warehouses={warehouses} hasPermission={hasPermission} />;
+  }
+
+  if (defaultTab === 'goods-returns') {
+    return <GoodsReturnsTab token={token} onLogout={onLogout} embedded={embedded} warehouses={warehouses} hasPermission={hasPermission} />;
+  }
+
+  if (defaultTab === 'deposits') {
+    return <SupplierDepositsTab token={token} onLogout={onLogout} embedded={embedded} suppliers={suppliers} hasPermission={hasPermission} />;
   }
 
   const content = (

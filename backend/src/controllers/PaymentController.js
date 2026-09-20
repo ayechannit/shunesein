@@ -41,10 +41,11 @@ class PaymentController {
       const safeOrder = String(order).toUpperCase() === 'ASC' ? 'ASC' : 'DESC';
 
       const dataQuery = `
-        SELECT p.*, pm.name as method_name, a.name as account_name
+        SELECT p.*, pm.name as method_name, a.name as account_name, sd.reference_no as deposit_reference_no
         FROM payments p
         LEFT JOIN payment_methods pm ON p.payment_method_id = pm.id
         LEFT JOIN accounts a ON a.id = p.account_id
+        LEFT JOIN supplier_deposits sd ON sd.id = p.deposit_id
         ${whereClause}
         ORDER BY p.${safeSortBy} ${safeOrder}
         LIMIT ${limit} OFFSET ${offset}
@@ -77,6 +78,7 @@ class PaymentController {
       bank_name,
       note,
       account_id,
+      deposit_id,
     } = req.body;
     const created_by = req.user.id;
 
@@ -94,7 +96,15 @@ class PaymentController {
       return res.status(400).json({ message: 'Payment amount must be a positive number' });
     }
 
-    if (!payment_method_id) {
+    // A deposit can only reduce what we owe a supplier - there's no
+    // equivalent concept on the sales side here.
+    if (deposit_id && transaction_type !== 'purchase') {
+      return res.status(400).json({ message: 'A supplier deposit can only be applied to a purchase payment' });
+    }
+
+    // When funded from a deposit, the payment method is fixed to the
+    // system 'Supplier Deposit' method below - the caller doesn't choose one.
+    if (!deposit_id && !payment_method_id) {
       return res.status(400).json({ message: 'Payment method is required' });
     }
 
@@ -123,16 +133,48 @@ class PaymentController {
           throw new HttpError(400, `Payment exceeds outstanding balance. Remaining balance is ${remaining.toFixed(2)}.`);
         }
 
+        // Optionally reduce a supplier deposit instead of moving cash - see
+        // migration 026_add_supplier_deposits.sql. Resolve the deposit's
+        // fixed method/account here so the caller can't pass a mismatched
+        // payment_method_id/account_id for a deposit-funded payment.
+        let resolvedPaymentMethodId = payment_method_id || null;
+        let resolvedAccountId = account_id || null;
+
+        if (deposit_id) {
+          const depositResult = await client.query('SELECT * FROM supplier_deposits WHERE id = $1 FOR UPDATE', [deposit_id]);
+          if (depositResult.rows.length === 0) {
+            throw new HttpError(404, 'Supplier deposit not found');
+          }
+          const deposit = depositResult.rows[0];
+          if (deposit.supplier_id !== transaction.supplier_id) {
+            throw new HttpError(400, 'This deposit belongs to a different supplier');
+          }
+          const depositUsedResult = await client.query(
+            `SELECT COALESCE(SUM(amount), 0) as total_used FROM payments WHERE deposit_id = $1`,
+            [deposit_id]
+          );
+          const depositAvailable = Math.round((Number(deposit.amount) - Number(depositUsedResult.rows[0].total_used)) * 100) / 100;
+          if (numericAmount > depositAvailable + 0.01) {
+            throw new HttpError(400, `Payment exceeds available deposit balance. Available: ${depositAvailable.toFixed(2)}.`);
+          }
+          const methodResult = await client.query(`SELECT id FROM payment_methods WHERE code = 'SUPPLIER_DEPOSIT'`);
+          if (methodResult.rows.length === 0) {
+            throw new HttpError(500, 'Supplier Deposit payment method is not set up - run pending database migrations.');
+          }
+          resolvedPaymentMethodId = methodResult.rows[0].id;
+          resolvedAccountId = null; // no cash/bank movement - funded from the deposit instead
+        }
+
         const paymentQuery = `
           INSERT INTO payments (
             transaction_type, transaction_id, payment_date, payment_method_id,
-            amount, reference_no, bank_name, note, account_id, created_by
-          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+            amount, reference_no, bank_name, note, account_id, created_by, deposit_id
+          ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
           RETURNING *
         `;
         const pResult = await client.query(paymentQuery, [
-          transaction_type, transaction_id, payment_date, payment_method_id,
-          numericAmount, reference_no, bank_name, note, account_id || null, created_by,
+          transaction_type, transaction_id, payment_date, resolvedPaymentMethodId,
+          numericAmount, reference_no, bank_name, note, resolvedAccountId, created_by, deposit_id || null,
         ]);
         const payment = pResult.rows[0];
 
@@ -142,13 +184,14 @@ class PaymentController {
         const newStatus = newPaidTotal >= netAmount - 0.01 ? 'paid' : 'partial';
         await client.query(`UPDATE ${table} SET payment_status = $1 WHERE id = $2`, [newStatus, transaction_id]);
 
-        if (account_id) {
+        if (resolvedAccountId) {
           const adjustment = transaction_type === 'purchase' ? -numericAmount : numericAmount;
-          await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [adjustment, account_id]);
+          await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [adjustment, resolvedAccountId]);
         }
 
         // Paying a supplier reduces what we owe them; a customer paying an invoice
-        // reduces what they owe us.
+        // reduces what they owe us. This holds whether the payment was funded by
+        // cash/bank or drawn from a deposit - either way, less is now owed.
         if (transaction_type === 'purchase' && transaction.supplier_id) {
           await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [numericAmount, transaction.supplier_id]);
         }
@@ -157,19 +200,24 @@ class PaymentController {
         }
 
         // General Ledger: a customer receipt moves cash in and clears AR; a
-        // supplier payment moves cash out and clears AP. Posted against the
-        // single Cash & Bank system account regardless of which specific
+        // supplier payment moves cash out (or draws down the Advance to
+        // Suppliers asset, if deposit-funded) and clears AP. Posted against
+        // the single Cash & Bank system account regardless of which specific
         // cash/bank account this payment used - see migration 011 for why.
         await postJournalEntry(client, {
           date: payment.payment_date,
           referenceType: 'payment',
           referenceId: payment.id,
-          description: transaction_type === 'purchase' ? `Payment to supplier (voucher #${transaction_id})` : `Payment from customer (invoice #${transaction_id})`,
+          description: transaction_type === 'purchase'
+            ? `Payment to supplier (voucher #${transaction_id})${deposit_id ? ` from deposit #${deposit_id}` : ''}`
+            : `Payment from customer (invoice #${transaction_id})`,
           createdBy: created_by,
           lines: transaction_type === 'purchase'
             ? [
                 { code: ACCOUNT_CODES.ACCOUNTS_PAYABLE, debit: numericAmount },
-                { code: ACCOUNT_CODES.CASH_AND_BANK, credit: numericAmount },
+                deposit_id
+                  ? { code: ACCOUNT_CODES.SUPPLIER_DEPOSITS, credit: numericAmount }
+                  : { code: ACCOUNT_CODES.CASH_AND_BANK, credit: numericAmount },
               ]
             : [
                 { code: ACCOUNT_CODES.CASH_AND_BANK, debit: numericAmount },
@@ -211,9 +259,6 @@ class PaymentController {
     if (!Number.isFinite(numericAmount) || numericAmount <= 0) {
       return res.status(400).json({ message: 'Payment amount must be a positive number' });
     }
-    if (!payment_method_id) {
-      return res.status(400).json({ message: 'Payment method is required' });
-    }
 
     try {
       const result = await db.withTransaction(async (client) => {
@@ -222,6 +267,14 @@ class PaymentController {
           throw new HttpError(404, 'Payment not found');
         }
         const existing = existingResult.rows[0];
+        // Whether this payment is funded from a deposit is fixed at creation,
+        // same as transaction_type/transaction_id - it can't be moved to/from
+        // cash funding on edit, only its amount/date/reference/note can change.
+        const fundedByDeposit = !!existing.deposit_id;
+
+        if (!fundedByDeposit && !payment_method_id) {
+          throw new HttpError(400, 'Payment method is required');
+        }
 
         const table = TRANSACTION_TABLES[existing.transaction_type];
         const txResult = await client.query(`SELECT * FROM ${table} WHERE id = $1 FOR UPDATE`, [existing.transaction_id]);
@@ -259,6 +312,26 @@ class PaymentController {
           throw new HttpError(400, `Payment exceeds outstanding balance. Remaining balance is ${remaining.toFixed(2)}.`);
         }
 
+        // If deposit-funded, also re-validate against what's left of the
+        // deposit itself, excluding this payment's own prior draw on it.
+        if (fundedByDeposit) {
+          const depositUsedResult = await client.query(
+            `SELECT COALESCE(SUM(amount), 0) as total_used FROM payments WHERE deposit_id = $1 AND id != $2`,
+            [existing.deposit_id, id]
+          );
+          const depositResult = await client.query('SELECT amount FROM supplier_deposits WHERE id = $1 FOR UPDATE', [existing.deposit_id]);
+          const depositAvailable = Math.round((Number(depositResult.rows[0].amount) - Number(depositUsedResult.rows[0].total_used)) * 100) / 100;
+          if (numericAmount > depositAvailable + 0.01) {
+            throw new HttpError(400, `Payment exceeds available deposit balance. Available: ${depositAvailable.toFixed(2)}.`);
+          }
+        }
+
+        // Deposit-funded payments keep their existing payment_method_id/
+        // account_id (fixed 'Supplier Deposit' method, no account) - only a
+        // cash/bank-funded payment can have these edited.
+        const resolvedPaymentMethodId = fundedByDeposit ? existing.payment_method_id : payment_method_id;
+        const resolvedAccountId = fundedByDeposit ? null : (account_id || null);
+
         const updateQuery = `
           UPDATE payments
           SET payment_date = $1, payment_method_id = $2, amount = $3, reference_no = $4, bank_name = $5, note = $6, account_id = $7
@@ -266,7 +339,7 @@ class PaymentController {
           RETURNING *
         `;
         const updateResult = await client.query(updateQuery, [
-          payment_date, payment_method_id, numericAmount, reference_no, bank_name, note, account_id || null, id,
+          payment_date, resolvedPaymentMethodId, numericAmount, reference_no, bank_name, note, resolvedAccountId, id,
         ]);
         const updated = updateResult.rows[0];
 
@@ -274,9 +347,9 @@ class PaymentController {
         const newStatus = newPaidTotal >= netAmount - 0.01 ? 'paid' : 'partial';
         await client.query(`UPDATE ${table} SET payment_status = $1 WHERE id = $2`, [newStatus, existing.transaction_id]);
 
-        if (account_id) {
+        if (resolvedAccountId) {
           const newAdjustment = existing.transaction_type === 'purchase' ? -numericAmount : numericAmount;
-          await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [newAdjustment, account_id]);
+          await client.query('UPDATE accounts SET balance = balance + $1 WHERE id = $2', [newAdjustment, resolvedAccountId]);
         }
         if (existing.transaction_type === 'purchase' && transaction.supplier_id) {
           await client.query('UPDATE suppliers SET outstanding_balance = outstanding_balance - $1 WHERE id = $2', [numericAmount, transaction.supplier_id]);
@@ -297,7 +370,9 @@ class PaymentController {
           lines: existing.transaction_type === 'purchase'
             ? [
                 { code: ACCOUNT_CODES.ACCOUNTS_PAYABLE, debit: numericAmount },
-                { code: ACCOUNT_CODES.CASH_AND_BANK, credit: numericAmount },
+                fundedByDeposit
+                  ? { code: ACCOUNT_CODES.SUPPLIER_DEPOSITS, credit: numericAmount }
+                  : { code: ACCOUNT_CODES.CASH_AND_BANK, credit: numericAmount },
               ]
             : [
                 { code: ACCOUNT_CODES.CASH_AND_BANK, debit: numericAmount },

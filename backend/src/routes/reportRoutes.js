@@ -31,6 +31,7 @@ const {
   VIEW_REPORT_SUPPLIER_STATEMENT,
   VIEW_REPORT_CASH_FLOW,
   VIEW_REPORT_FUND_TRANSFER_REGISTER,
+  VIEW_REPORT_SUPPLIER_DEPOSIT_REGISTER,
   VIEW_REPORT_SALESPERSON_PERFORMANCE,
   VIEW_REPORT_CHART_OF_ACCOUNTS,
   VIEW_REPORT_TRIAL_BALANCE,
@@ -75,6 +76,7 @@ router.get('/customer-statement', verifyToken, checkPermission(VIEW_REPORT_CUSTO
 router.get('/supplier-statement', verifyToken, checkPermission(VIEW_REPORT_SUPPLIER_STATEMENT), reportCtrl.getSupplierStatement);
 router.get('/cash-flow', verifyToken, checkPermission(VIEW_REPORT_CASH_FLOW), reportCtrl.getCashFlowStatement);
 router.get('/fund-transfer-register', verifyToken, checkPermission(VIEW_REPORT_FUND_TRANSFER_REGISTER), reportCtrl.getFundTransferRegister);
+router.get('/supplier-deposit-register', verifyToken, checkPermission(VIEW_REPORT_SUPPLIER_DEPOSIT_REGISTER), reportCtrl.getSupplierDepositRegister);
 router.get('/salesperson-performance', verifyToken, checkPermission(VIEW_REPORT_SALESPERSON_PERFORMANCE), reportCtrl.getSalespersonPerformance);
 router.get('/chart-of-accounts', verifyToken, checkPermission(VIEW_REPORT_CHART_OF_ACCOUNTS), reportCtrl.getChartOfAccounts);
 router.get('/trial-balance', verifyToken, checkPermission(VIEW_REPORT_TRIAL_BALANCE), reportCtrl.getTrialBalance);

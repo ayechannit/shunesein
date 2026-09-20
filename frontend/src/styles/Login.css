@@ -3,8 +3,11 @@
    ========================================================================= */
 
 :root {
-  --login-primary: #aa3bff;
-  --login-primary-hover: #9016eb;
+  /* Matches --md-primary in MasterDataManagement.css so the login screen
+     reads as the same product as the app behind it, not a different theme. */
+  --login-primary: #2563eb;
+  --login-primary-hover: #1d4ed8;
+  --login-primary-rgb: 37, 99, 235;
   --login-bg-1: #16171d;
   --login-bg-2: #1f2028;
   --login-card-bg: rgba(31, 32, 40, 0.4);
@@ -12,6 +15,7 @@
   --login-text: #f3f4f6;
   --login-text-muted: #9ca3af;
   --login-input-bg: rgba(0, 0, 0, 0.2);
+  --login-error: #ef4444;
 }
 
 /* Light Mode Overrides if required (Defaulting to premium dark glass theme) */
@@ -252,11 +256,24 @@
   text-decoration: none;
   font-weight: 500;
   transition: opacity 0.2s ease;
+  background: none;
+  border: none;
+  padding: 0;
+  font-size: inherit;
+  font-family: inherit;
+  cursor: pointer;
 }
 
 .forgot-link:hover {
   opacity: 0.8;
   text-decoration: underline;
+}
+
+.forgot-hint {
+  margin: -12px 0 0;
+  font-size: 13px;
+  color: var(--login-text-muted);
+  text-align: right;
 }
 
 /* Submit Button */
@@ -273,7 +290,7 @@
   cursor: pointer;
   overflow: hidden;
   transition: all 0.3s ease;
-  box-shadow: 0 4px 15px rgba(170, 59, 255, 0.3);
+  box-shadow: 0 4px 15px rgba(var(--login-primary-rgb), 0.3);
   margin-top: 8px;
   display: flex;
   justify-content: center;
@@ -284,7 +301,7 @@
 .btn-login:hover {
   background: var(--login-primary-hover);
   transform: translateY(-2px);
-  box-shadow: 0 8px 25px rgba(170, 59, 255, 0.4);
+  box-shadow: 0 8px 25px rgba(var(--login-primary-rgb), 0.4);
 }
 
 .btn-login:active {

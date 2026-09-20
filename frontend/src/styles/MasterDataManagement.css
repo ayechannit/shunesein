@@ -84,6 +84,54 @@ input[type="radio"] { accent-color: var(--md-primary); }
   border-right: 1px solid var(--md-border);
   z-index: 20;
   overflow: clip;
+  transition: width 200ms ease, flex-basis 200ms ease, padding 200ms ease;
+}
+
+/* Desktop icon-rail collapse - a pure display preference (see
+   MasterDataManagement.jsx sidebarCollapsed), separate from the mobile
+   off-canvas drawer below, so it's scoped to widths where the sidebar is
+   actually docked rather than sliding over the content. Lives inline in
+   .sidebar-header-actions (not absolutely positioned straddling the
+   sidebar's edge) - a straddling circle used to have ~half its hit area
+   clipped by .master-sidebar's overflow: clip, making it nearly impossible
+   to click and hard to even see. */
+.sidebar-collapse-toggle {
+  width: 32px;
+  height: 32px;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  border: 1px solid var(--md-border);
+  border-radius: var(--md-radius);
+  background: var(--md-surface);
+  color: var(--md-muted);
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: background 160ms ease, color 160ms ease, border-color 160ms ease;
+}
+.sidebar-collapse-toggle:hover {
+  background: var(--md-primary-soft);
+  color: var(--md-primary);
+  border-color: var(--md-primary);
+}
+.sidebar-collapse-toggle .master-icon {
+  width: 14px;
+  height: 14px;
+  transition: transform 200ms ease;
+}
+.sidebar-collapse-toggle .is-pointing-left { transform: rotate(90deg); }
+.sidebar-collapse-toggle .is-pointing-right { transform: rotate(-90deg); }
+
+@media (min-width: 1024px) {
+  .sidebar-collapse-toggle { display: inline-flex; }
+
+  .master-sidebar.is-collapsed { width: 76px; flex: 0 0 76px; padding: 20px 12px; }
+  .master-sidebar.is-collapsed .sidebar-header { flex-direction: column; align-items: center; gap: 10px; }
+  .master-sidebar.is-collapsed .sidebar-brand { justify-content: center; }
+  .master-sidebar.is-collapsed .nav-group-toggle { display: none; }
+  .master-sidebar.is-collapsed .nav-item { justify-content: center; padding: 10px; }
+  .master-sidebar.is-collapsed .profile-card { justify-content: center; padding: 10px; }
+  .master-sidebar.is-collapsed .sidebar-signout { display: flex; align-items: center; justify-content: center; padding: 10px; }
 }
 
 .sidebar-header {
@@ -94,9 +142,16 @@ input[type="radio"] { accent-color: var(--md-primary); }
   flex-shrink: 0;
 }
 
+.sidebar-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
 .sidebar-close {
   display: none;
-  width: 36px; height: 36px;
+  width: 32px; height: 32px;
   align-items: center; justify-content: center;
   border: 1px solid var(--md-border);
   border-radius: var(--md-radius);
@@ -144,6 +199,17 @@ input[type="radio"] { accent-color: var(--md-primary); }
   min-height: 0;
   overflow-y: auto;
   padding-right: 4px;
+  /* Top/bottom scroll-shadow: same trick as .table-shell - each gradient
+     layer only renders past the scrolled edge, so the fade appears only on
+     whichever side still has hidden nav items, with no scroll listener. */
+  background:
+    linear-gradient(to bottom, var(--md-surface) 40%, rgba(255, 255, 255, 0)) 0 0,
+    linear-gradient(to top, var(--md-surface) 40%, rgba(255, 255, 255, 0)) 0 100%,
+    linear-gradient(to bottom, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0)) 0 0,
+    linear-gradient(to top, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0)) 0 100%;
+  background-repeat: no-repeat;
+  background-size: 100% 24px, 100% 24px, 100% 10px, 100% 10px;
+  background-attachment: local, local, scroll, scroll;
 }
 
 .nav-group { display: grid; gap: 8px; }
@@ -707,10 +773,28 @@ input[type="radio"] { accent-color: var(--md-primary); }
 .table-shell {
   overflow-x: auto;
   -webkit-overflow-scrolling: touch;
+  /* Scroll-shadow hint: the two gradient layers only render past the
+     scrolled edge (background-attachment: local scrolls with the content,
+     scroll stays fixed to the viewport), so a fade only appears on
+     whichever side still has hidden columns - no JS scroll listener needed. */
+  background:
+    linear-gradient(to right, var(--md-surface) 30%, rgba(255, 255, 255, 0)) 0 0,
+    linear-gradient(to left, var(--md-surface) 30%, rgba(255, 255, 255, 0)) 100% 0,
+    linear-gradient(to right, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0)) 0 0,
+    linear-gradient(to left, rgba(15, 23, 42, 0.08), rgba(15, 23, 42, 0)) 100% 0;
+  background-repeat: no-repeat;
+  background-size: 32px 100%, 32px 100%, 12px 100%, 12px 100%;
+  background-attachment: local, local, scroll, scroll;
 }
 
 /* ─── Table ─── */
-table {
+/* Scoped to the generic list table (.table-shell wraps it, giving it its own
+   horizontal scroll) - this used to be a bare `table` selector, which leaked
+   the 700px floor onto every other table on the site (item-entry tables in
+   Procurement/Sales/Inventory forms, view-record tables, etc.), forcing them
+   wider than their own content needed and defeating their mobile
+   stacked-card layout even when they had no reason to need one. */
+.table-shell table {
   width: 100%;
   min-width: 700px;
   border-collapse: collapse;
@@ -744,10 +828,26 @@ tbody tr { transition: background 120ms ease; }
 tbody tr:hover { background: #f8fafc; }
 tbody tr:last-child td { border-bottom: none; }
 
+/* Pinned to the right edge of .table-shell (the scrolling ancestor) so the
+   action menu stays reachable without scrolling a wide table all the way
+   over - sticky works on both axes at once, so action-head still also
+   sticks to the top via the `thead th` rule above. Each needs its own
+   opaque background (sticky cells sit ON TOP of the columns scrolling
+   underneath them, so a transparent td would let that content show
+   through) and the hover rule below keeps that background in sync with the
+   row-hover highlight the rest of the row gets for free. */
 .action-head, .action-cell { width: 70px; text-align: center !important; }
+.action-head, .action-cell {
+  position: sticky;
+  right: 0;
+  z-index: 3;
+  box-shadow: -8px 0 8px -8px rgba(15, 23, 42, 0.12);
+}
+.action-head { background: #f8f9fb; }
+.action-cell { background: var(--md-surface); }
+tbody tr:hover .action-cell { background: #f8fafc; }
 .select-head, .select-cell { width: 44px; text-align: center !important; }
 .select-head input, .select-cell input { width: 16px; height: 16px; margin: 0; cursor: pointer; }
-.action-cell { position: relative; }
 
 .row-actions {
   position: relative;
@@ -757,17 +857,32 @@ tbody tr:last-child td { border-bottom: none; }
 }
 
 .row-menu-trigger {
-  width: 34px; height: 34px;
+  width: 32px; height: 32px;
   display: inline-grid;
   place-items: center;
   border-radius: var(--md-radius);
-  border: 1px solid transparent;
-  background: transparent;
-  color: var(--md-muted);
+  border: 1px solid var(--md-primary);
+  background: var(--md-primary-soft);
+  color: var(--md-primary);
   cursor: pointer;
-  transition: background 160ms ease, border-color 160ms ease;
+  box-shadow: var(--md-shadow-sm);
+  transition: background 160ms ease, border-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 120ms ease;
 }
-.row-menu-trigger:hover { background: #f3f4f6; border-color: var(--md-border); }
+.row-menu-trigger .button-icon { width: 18px; height: 18px; }
+.row-menu-trigger:hover {
+  background: var(--md-primary);
+  border-color: var(--md-primary);
+  color: #ffffff;
+  box-shadow: var(--md-shadow);
+  transform: translateY(-1px);
+}
+.row-menu-trigger:active { transform: translateY(0); }
+.row-menu-trigger[aria-expanded="true"] {
+  background: var(--md-primary);
+  border-color: var(--md-primary);
+  color: #ffffff;
+  box-shadow: 0 0 0 4px rgba(37, 99, 235, 0.15);
+}
 
 /* ─── Dropdown Menu ─── */
 /* This wrapper is always position: fixed, viewport-relative, regardless of

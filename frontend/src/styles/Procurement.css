@@ -88,6 +88,13 @@
   min-width: 950px;
 }
 
+/* Purchase Returns' item table: Product/Qty/Warehouse/Price/Subtotal only,
+   no Lot #/Expiry - the 950px variant above was sized for those two extra
+   columns and left this one scrolling further than its five columns need. */
+.procurement-items-table.has-warehouse {
+  min-width: 760px;
+}
+
 .procurement-items-table thead th {
   padding: 0.7rem 0.75rem;
   font-size: 12px;
@@ -357,6 +364,19 @@
     grid-template-columns: 1fr;
   }
 
+  /* The desktop min-width variants above (760-950px, sized to keep columns
+     readable in a fixed table layout) fought this card conversion instead
+     of just being irrelevant to it: the table element itself stayed pinned
+     to that width inside its scroll wrapper, so every "card" row below was
+     also stretched to it and ran off the edge of the phone screen - visually
+     breaking the stacked layout and forcing horizontal scroll despite the
+     column-width resets further down neutralizing the per-cell floors. */
+  .procurement-items-table.has-lot-expiry,
+  .procurement-items-table.has-warehouse-lot-expiry,
+  .procurement-items-table.has-warehouse {
+    min-width: 0;
+  }
+
   /* Convert items table to cards */
   .procurement-items-table thead {
     display: none;
@@ -471,3 +491,48 @@
   font-size: 14px;
   color: #6b7280;
 }
+
+/* ─── Payment progress bar + balance-due pill (voucher/invoice list tables) ─── */
+.payment-progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-width: 120px;
+}
+.payment-progress-track {
+  flex: 1;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--md-border, #e2e5ea);
+  overflow: hidden;
+}
+.payment-progress-fill {
+  height: 100%;
+  border-radius: 999px;
+  transition: width 260ms ease;
+}
+.payment-progress-fill-accent { background: linear-gradient(90deg, #60a5fa, var(--md-primary, #2563eb)); }
+.payment-progress-fill-success { background: linear-gradient(90deg, #4ade80, var(--md-success, #16a34a)); }
+.payment-progress-fill-muted { background: var(--md-border-strong, #cdd2d9); }
+.payment-progress-percent {
+  flex: 0 0 auto;
+  min-width: 32px;
+  font-size: 11px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+  color: var(--md-muted, #6b7280);
+}
+
+.balance-due-pill {
+  display: inline-flex;
+  align-items: center;
+  padding: 3px 10px;
+  border-radius: 999px;
+  font-size: 12px;
+  font-weight: 700;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+.balance-due-pill-due { background: var(--md-danger-soft, #fef2f2); color: var(--md-danger, #dc2626); }
+.balance-due-pill-paid { background: var(--md-success-soft, #f0fdf4); color: var(--md-success, #16a34a); }

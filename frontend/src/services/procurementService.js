@@ -64,6 +64,20 @@ export const updatePurchaseOrderStatus = async (token, id, status) =>
 export const getOrderForVoucherConversion = async (token, id) =>
   buildRequest(`${API_ROOT}/procurement/orders/${id}/convert`, token);
 
+export const getOrderForReceiving = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/orders/${id}/receiving`, token);
+
+export const getOrderForReturning = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/orders/${id}/returning`, token);
+
+// A direct voucher (billed with no PO at all) is its own eligible parent for
+// receiving/returning - same shape as the order versions above.
+export const getVoucherForReceiving = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/vouchers/${id}/receiving`, token);
+
+export const getVoucherForReturning = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/vouchers/${id}/returning`, token);
+
 // Purchase Vouchers
 export const fetchPurchaseVouchers = async (token, params = {}) => {
   const query = new URLSearchParams({
@@ -96,35 +110,80 @@ export const deletePurchaseVoucher = async (token, id) =>
     method: 'DELETE',
   });
 
-// Purchase Returns / Debit Notes
-export const fetchPurchaseReturns = async (token, params = {}) => {
+// Goods Receipts - the only thing that moves procurement stock. Create+delete only.
+export const fetchGoodsReceipts = async (token, params = {}) => {
   const query = new URLSearchParams({
     page: '1',
     limit: '20',
     ...params,
   });
-  return buildRequest(`${API_ROOT}/procurement/returns?${query.toString()}`, token);
+  return buildRequest(`${API_ROOT}/procurement/receipts?${query.toString()}`, token);
 };
 
-export const fetchPurchaseReturnById = async (token, id) =>
-  buildRequest(`${API_ROOT}/procurement/returns/${id}`, token);
+export const fetchGoodsReceiptById = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/receipts/${id}`, token);
 
-export const createPurchaseReturn = async (token, payload) =>
-  buildRequest(`${API_ROOT}/procurement/returns`, token, {
+export const createGoodsReceipt = async (token, payload) =>
+  buildRequest(`${API_ROOT}/procurement/receipts`, token, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
 
-export const updatePurchaseReturn = async (token, id, payload) =>
-  buildRequest(`${API_ROOT}/procurement/returns/${id}`, token, {
-    method: 'PUT',
+export const deleteGoodsReceipt = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/receipts/${id}`, token, {
+    method: 'DELETE',
+  });
+
+// Goods Returns - references the PO (like Goods Receipts), capped at
+// received-not-yet-returned per line. Create+delete only.
+export const fetchGoodsReturns = async (token, params = {}) => {
+  const query = new URLSearchParams({
+    page: '1',
+    limit: '20',
+    ...params,
+  });
+  return buildRequest(`${API_ROOT}/procurement/goods-returns?${query.toString()}`, token);
+};
+
+export const fetchGoodsReturnById = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/goods-returns/${id}`, token);
+
+export const createGoodsReturn = async (token, payload) =>
+  buildRequest(`${API_ROOT}/procurement/goods-returns`, token, {
+    method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(payload),
   });
 
-export const deletePurchaseReturn = async (token, id) =>
-  buildRequest(`${API_ROOT}/procurement/returns/${id}`, token, {
+export const deleteGoodsReturn = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/goods-returns/${id}`, token, {
+    method: 'DELETE',
+  });
+
+// Supplier Deposits
+export const fetchSupplierDeposits = async (token, params = {}) => {
+  const query = new URLSearchParams({
+    page: '1', limit: '20', ...params,
+  });
+  return buildRequest(`${API_ROOT}/procurement/deposits?${query.toString()}`, token);
+};
+
+export const fetchSupplierDepositById = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/deposits/${id}`, token);
+
+export const fetchSupplierDepositBalance = async (token, supplierId) =>
+  buildRequest(`${API_ROOT}/procurement/deposits/supplier/${supplierId}/balance`, token);
+
+export const createSupplierDeposit = async (token, payload) =>
+  buildRequest(`${API_ROOT}/procurement/deposits`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
+export const deleteSupplierDeposit = async (token, id) =>
+  buildRequest(`${API_ROOT}/procurement/deposits/${id}`, token, {
     method: 'DELETE',
   });
 

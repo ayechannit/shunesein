@@ -313,9 +313,12 @@ function iconForModule(moduleKey) {
       return 'credit-card';
     case 'purchase-orders':
     case 'purchase-vouchers':
+    case 'goods-receipts':
       return 'truck';
-    case 'purchase-returns':
+    case 'goods-returns':
       return 'refresh';
+    case 'supplier-deposits':
+      return 'wallet';
     case 'sale-orders':
     case 'sales-invoices':
       return 'copy';
@@ -391,6 +394,8 @@ function iconForModule(moduleKey) {
       return 'wallet';
     case 'report-fund-transfer-register':
       return 'refresh';
+    case 'report-supplier-deposit-register':
+      return 'wallet';
     case 'report-delivery-performance':
       return 'truck';
     case 'report-document-register':
@@ -438,15 +443,43 @@ const MasterDataManagement = ({ token, onLogout }) => {
     }, {}),
   );
   const [lookupCache, setLookupCache] = useState({});
+  // Only the section holding the landing module starts open - the nav has
+  // 8 sections / 60+ items total, so expanding everything by default meant
+  // reaching the last section required scrolling past all the others first.
+  // Accordion behavior (click a section header to open it) keeps every item
+  // reachable while keeping the initial list short.
   const [expandedSections, setExpandedSections] = useState({
-    'master-data': true,
-    procurement: true,
-    sales: true,
-    inventory: true,
-    finance: true,
-    'access-control': true,
+    overview: true,
+    'master-data': false,
+    procurement: false,
+    sales: false,
+    inventory: false,
+    finance: false,
+    reports: false,
+    'access-control': false,
   });
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  // Desktop-only icon-rail collapse (separate from the mobile off-canvas
+  // drawer above) - remembered across reloads the same way expandedSections
+  // isn't, since this is a pure display preference, not workflow state.
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(() => {
+    try {
+      return localStorage.getItem('sidebarCollapsed') === 'true';
+    } catch {
+      return false;
+    }
+  });
+  const toggleSidebarCollapsed = () => {
+    setSidebarCollapsed((previous) => {
+      const next = !previous;
+      try {
+        localStorage.setItem('sidebarCollapsed', String(next));
+      } catch {
+        // ignore - collapse still works for this session, just won't persist
+      }
+      return next;
+    });
+  };
   const [currentUser, setCurrentUser] = useState(null);
   // null while loading - hasPermission fails closed until the real set
   // arrives, so nav/buttons this user can't use never flash visible first.
@@ -609,19 +642,6 @@ const MasterDataManagement = ({ token, onLogout }) => {
     document.addEventListener('mousedown', handleOutside);
     return () => document.removeEventListener('mousedown', handleOutside);
   }, [activeModuleKey]);
-
-  useEffect(() => {
-    if (window.innerWidth >= 1024) {
-      setExpandedSections({
-        'master-data': true,
-        procurement: true,
-        sales: true,
-        inventory: true,
-        finance: true,
-        'access-control': true,
-      });
-    }
-  }, []);
 
   useEffect(() => {
     const handleResize = () => {
@@ -1392,6 +1412,8 @@ const MasterDataManagement = ({ token, onLogout }) => {
         className={sidebarOpen ? 'is-open' : ''}
         isOpen={sidebarOpen}
         onClose={() => setSidebarOpen(false)}
+        collapsed={sidebarCollapsed}
+        onToggleCollapse={toggleSidebarCollapsed}
       />
 
       <main className="master-content">

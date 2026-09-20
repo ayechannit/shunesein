@@ -35,7 +35,7 @@ const ICON_PATHS = {
   plus: 'M12 5v14M5 12h14',
   close: 'M18 6 6 18M6 6l12 12',
   chevron: 'M7 10l5 5 5-5',
-  dots: 'M12 6.5h.01M12 12h.01M12 17.5h.01',
+  dots: 'M6.5 12h.01M12 12h.01M17.5 12h.01',
   refresh: 'M20 12a8 8 0 0 0-14-5.3V4M4 4v6h6M4 12a8 8 0 0 0 14 5.3V20M20 20v-6h-6',
   upload: 'M12 16V4m0 0 4 4m-4-4-4 4M4 20h16',
   download: 'M12 4v12m0 0-4-4m4 4 4-4M4 20h16',
@@ -47,6 +47,7 @@ const ICON_PATHS = {
   xCircle: 'M12 22c5.523 0 10-4.477 10-10S17.523 2 12 2 2 6.477 2 12s4.477 10 10 10z M15 9l-6 6 M9 9l6 6',
   copy: 'M8 17.7c0 .72.58 1.3 1.3 1.3h9.4c.72 0 1.3-.58 1.3-1.3V8.3c0-.72-.58-1.3-1.3-1.3h-9.4c-.72 0-1.3.58-1.3 1.3v9.4z M14.7 4h-9.4c-.72 0-1.3.58-1.3 1.3v9.4',
   alertTriangle: 'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
+  logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
 };
 
 export const AppIcon = ({ name, className = '' }) => (
@@ -82,6 +83,7 @@ export const CopyIcon = ({ className = '' }) => <AppIcon name="copy" className={
 export const PrinterIcon = ({ className = '' }) => <AppIcon name="printer" className={className} />;
 export const AlertTriangleIcon = ({ className = '' }) => <AppIcon name="alertTriangle" className={className} />;
 export const WalletIcon = ({ className = '' }) => <AppIcon name="wallet" className={className} />;
+export const LogoutIcon = ({ className = '' }) => <AppIcon name="logout" className={className} />;
 
 // Stat tile: label (sentence case) + a semibold value. `tone` colors the value for
 // default/success/warning/danger states; leave it 'default' for neutral figures.
@@ -105,6 +107,28 @@ export const ProgressMeter = ({ percent, tone = 'accent', caption }) => {
     </div>
   );
 };
+
+// Compact payment-progress bar for a table row (voucher/invoice list tables) -
+// a slim gradient fill with the percent inline, rather than ProgressMeter's
+// taller detail-view layout with a caption line underneath.
+export const PaymentProgressBar = ({ percent }) => {
+  const safePercent = Math.max(0, Math.min(100, Number(percent) || 0));
+  const tone = safePercent >= 100 ? 'success' : safePercent > 0 ? 'accent' : 'muted';
+  return (
+    <div className="payment-progress">
+      <div className="payment-progress-track">
+        <div className={`payment-progress-fill payment-progress-fill-${tone}`} style={{ width: `${safePercent}%` }} />
+      </div>
+      <span className="payment-progress-percent">{Math.round(safePercent)}%</span>
+    </div>
+  );
+};
+
+// Balance-due pill for the same tables - a colored badge (matching
+// StatusBadge's soft-background language) rather than plain colored text.
+export const BalanceDuePill = ({ value, due }) => (
+  <span className={`balance-due-pill ${due ? 'balance-due-pill-due' : 'balance-due-pill-paid'}`}>{value}</span>
+);
 
 export const AppButton = ({
   children,
@@ -134,33 +158,52 @@ export const Sidebar = ({
   className = '',
   isOpen = true,
   onClose,
+  collapsed = false,
+  onToggleCollapse,
 }) => (
-  <aside className={`master-sidebar ${isOpen ? 'is-open' : ''} ${className}`.trim()}>
+  <aside className={`master-sidebar ${isOpen ? 'is-open' : ''} ${collapsed ? 'is-collapsed' : ''} ${className}`.trim()}>
     <div className="sidebar-header">
       <div className="sidebar-brand">
         <div className="brand-mark">SN</div>
-        <div>
-          <strong>Shune Sein</strong>
-          <span>ရွှန်းစိန် လက်ဖက်နှင်အကြော်စုံ</span>
-        </div>
+        {!collapsed ? (
+          <div>
+            <strong>Shune Sein</strong>
+            <span>ရွှန်းစိန် လက်ဖက်နှင်အကြော်စုံ</span>
+          </div>
+        ) : null}
       </div>
-      {onClose ? (
-        <button type="button" className="sidebar-close" onClick={onClose} aria-label="Close navigation">
-          <CloseIcon className="button-icon" />
-        </button>
-      ) : null}
+      <div className="sidebar-header-actions">
+        {onToggleCollapse ? (
+          <button
+            type="button"
+            className="sidebar-collapse-toggle"
+            onClick={onToggleCollapse}
+            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+          >
+            <ChevronIcon className={collapsed ? 'is-pointing-right' : 'is-pointing-left'} />
+          </button>
+        ) : null}
+        {onClose ? (
+          <button type="button" className="sidebar-close" onClick={onClose} aria-label="Close navigation">
+            <CloseIcon className="button-icon" />
+          </button>
+        ) : null}
+      </div>
     </div>
 
     <nav className="sidebar-nav">
       {sections.map((section) => {
-        const expanded = expandedSections[section.key] ?? true;
+        const expanded = collapsed ? true : (expandedSections[section.key] ?? true);
 
         return (
           <div key={section.key} className="nav-group">
-            <button type="button" className="nav-group-toggle" onClick={() => onToggleSection(section.key)}>
-              <span>{section.title}</span>
-              <ChevronIcon className={`nav-chevron ${expanded ? 'is-open' : ''}`} />
-            </button>
+            {!collapsed ? (
+              <button type="button" className="nav-group-toggle" onClick={() => onToggleSection(section.key)}>
+                <span>{section.title}</span>
+                <ChevronIcon className={`nav-chevron ${expanded ? 'is-open' : ''}`} />
+              </button>
+            ) : null}
 
             <div className={`nav-group-body ${expanded ? 'is-open' : ''}`}>
               {section.items.map((item) => (
@@ -168,6 +211,7 @@ export const Sidebar = ({
                   type="button"
                   key={item.key}
                   className={`nav-item ${activeKey === item.key ? 'active' : ''}`}
+                  title={collapsed ? item.label : undefined}
                   onClick={() => {
                     onSelectItem(item.key);
                     if (onClose) {
@@ -178,7 +222,7 @@ export const Sidebar = ({
                   <span className="nav-icon">
                     <AppIcon name={item.icon} />
                   </span>
-                  <span className="nav-label">{item.label}</span>
+                  {!collapsed ? <span className="nav-label">{item.label}</span> : null}
                 </button>
               ))}
             </div>
@@ -194,16 +238,19 @@ export const Sidebar = ({
         onClick={onOpenProfile}
         disabled={!onOpenProfile}
         aria-label="Edit my profile"
+        title={collapsed ? `${userLabel || 'admin'} - ${userRole || 'Owner'}` : undefined}
       >
         <div className="avatar">{(userLabel || 'AD').slice(0, 2).toUpperCase()}</div>
-        <div>
-          <strong>{userLabel || 'admin'}</strong>
-          <span>{userRole || 'Owner'}</span>
-        </div>
+        {!collapsed ? (
+          <div>
+            <strong>{userLabel || 'admin'}</strong>
+            <span>{userRole || 'Owner'}</span>
+          </div>
+        ) : null}
       </button>
 
-      <button type="button" className="master-button master-button-secondary sidebar-signout" onClick={onLogout}>
-        Sign out
+      <button type="button" className="master-button master-button-secondary sidebar-signout" onClick={onLogout} title="Sign out">
+        {collapsed ? <LogoutIcon className="button-icon" /> : 'Sign out'}
       </button>
     </div>
   </aside>
@@ -326,7 +373,7 @@ export const StatusBadge = ({ value, type = 'default' }) => {
     const normalized = value.toLowerCase();
     if (normalized === 'active' || normalized === 'paid' || normalized === 'completed' || normalized === 'received') badgeType = 'success';
     if (normalized === 'inactive' || normalized === 'unpaid' || normalized === 'cancelled' || normalized === 'failed') badgeType = 'danger';
-    if (normalized === 'pending' || normalized === 'partial') badgeType = 'warning';
+    if (normalized === 'pending' || normalized === 'partial' || normalized === 'partially_received') badgeType = 'warning';
     if (normalized === 'approved') badgeType = 'info';
     label = value
       .replace(/_/g, ' ')
@@ -657,6 +704,7 @@ export const DropdownMenu = ({ trigger, open, onOpenChange, children, className 
           ref.current = node;
         }
       },
+      'aria-expanded': open,
       onClick: (event) => {
         event.stopPropagation();
         onOpenChange(!open);

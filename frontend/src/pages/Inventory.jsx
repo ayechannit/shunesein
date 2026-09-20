@@ -580,39 +580,41 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
                 <strong>Raw Materials</strong>
                 <AppButton variant="secondary" onClick={addRawItem}>Add Item</AppButton>
               </div>
-              <table className="procurement-items-table">
-                <thead><tr><th>Product</th><th>Source Warehouse</th><th>Quantity</th><th>Unit Cost</th><th></th></tr></thead>
-                <tbody>
-                  {formValues.raw_materials.map((item, index) => (
-                    <tr key={index}>
-                      <td>
-                        <SearchableSelect
-                          value={item.product_id}
-                          onChange={(newValue) => updateRawItem(index, 'product_id', newValue)}
-                          options={rawMaterialOptions}
-                          placeholder="Select raw material"
-                          searchPlaceholder="Search raw materials..."
-                        />
-                        {formErrors[`rm-product-${index}`] ? <div className="field-error">{formErrors[`rm-product-${index}`]}</div> : null}
-                      </td>
-                      <td>
-                        <select value={item.warehouse_id} onChange={(e) => updateRawItem(index, 'warehouse_id', e.target.value)}>
-                          <option value="">Select warehouse</option>
-                          {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                        </select>
-                        {formErrors[`rm-warehouse-${index}`] ? <div className="field-error">{formErrors[`rm-warehouse-${index}`]}</div> : null}
-                      </td>
-                      <td><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateRawItem(index, 'quantity', e.target.value)} /></td>
-                      <td><input type="number" min="0" step="0.01" value={item.unit_cost} onChange={(e) => updateRawItem(index, 'unit_cost', e.target.value)} /></td>
-                      <td>
-                        <button type="button" className="item-remove-btn" onClick={() => removeRawItem(index)} title="Remove item">
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
+              <div className="procurement-items-table-wrap">
+                <table className="procurement-items-table has-warehouse">
+                  <thead><tr><th>Product</th><th className="col-warehouse">Source Warehouse</th><th className="col-qty">Quantity</th><th className="col-price">Unit Cost</th><th></th></tr></thead>
+                  <tbody>
+                    {formValues.raw_materials.map((item, index) => (
+                      <tr key={index}>
+                        <td data-label="Product">
+                          <SearchableSelect
+                            value={item.product_id}
+                            onChange={(newValue) => updateRawItem(index, 'product_id', newValue)}
+                            options={rawMaterialOptions}
+                            placeholder="Select raw material"
+                            searchPlaceholder="Search raw materials..."
+                          />
+                          {formErrors[`rm-product-${index}`] ? <div className="field-error">{formErrors[`rm-product-${index}`]}</div> : null}
+                        </td>
+                        <td data-label="Source Warehouse" className="col-warehouse">
+                          <select value={item.warehouse_id} onChange={(e) => updateRawItem(index, 'warehouse_id', e.target.value)}>
+                            <option value="">Select warehouse</option>
+                            {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
+                          </select>
+                          {formErrors[`rm-warehouse-${index}`] ? <div className="field-error">{formErrors[`rm-warehouse-${index}`]}</div> : null}
+                        </td>
+                        <td data-label="Quantity" className="col-qty"><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateRawItem(index, 'quantity', e.target.value)} /></td>
+                        <td data-label="Unit Cost" className="col-price"><input type="number" min="0" step="0.01" value={item.unit_cost} onChange={(e) => updateRawItem(index, 'unit_cost', e.target.value)} /></td>
+                        <td data-label="">
+                          <button type="button" className="item-remove-btn" onClick={() => removeRawItem(index)} title="Remove item">
+                            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </div>
           </div>
         </MasterModal>
@@ -647,7 +649,12 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
                     <thead><tr><th>Product</th><th>Warehouse</th><th>Quantity</th><th>Unit Cost</th></tr></thead>
                     <tbody>
                       {viewRecord.raw_materials.map((item) => (
-                        <tr key={item.id}><td>{item.product_name || `Product #${item.product_id}`}</td><td>{item.warehouse_name || '-'}</td><td>{formatNumber(item.quantity)}</td><td>{formatNumber(item.unit_cost)}</td></tr>
+                        <tr key={item.id}>
+                          <td data-label="Product">{item.product_name || `Product #${item.product_id}`}</td>
+                          <td data-label="Warehouse">{item.warehouse_name || '-'}</td>
+                          <td data-label="Quantity">{formatNumber(item.quantity)}</td>
+                          <td data-label="Unit Cost">{formatNumber(item.unit_cost)}</td>
+                        </tr>
                       ))}
                     </tbody>
                   </table>
@@ -662,12 +669,12 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
                     <tbody>
                       {viewRecord.finished_goods.map((item) => (
                         <tr key={item.id}>
-                          <td>{item.product_name || `Product #${item.product_id}`}</td>
-                          <td>{item.warehouse_name || '-'}</td>
-                          <td>{formatNumber(item.quantity)}</td>
-                          <td>{formatNumber(item.unit_cost)}</td>
-                          <td>{item.lot_number || '-'}</td>
-                          <td>{item.expiry_date ? formatDate(item.expiry_date) : '-'}</td>
+                          <td data-label="Product">{item.product_name || `Product #${item.product_id}`}</td>
+                          <td data-label="Warehouse">{item.warehouse_name || '-'}</td>
+                          <td data-label="Quantity">{formatNumber(item.quantity)}</td>
+                          <td data-label="Unit Cost">{formatNumber(item.unit_cost)}</td>
+                          <td data-label="Lot #">{item.lot_number || '-'}</td>
+                          <td data-label="Expiry Date">{item.expiry_date ? formatDate(item.expiry_date) : '-'}</td>
                         </tr>
                       ))}
                     </tbody>
@@ -1073,7 +1080,7 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
                 <tbody>
                   {formValues.items.map((item, index) => (
                     <tr key={index}>
-                      <td>
+                      <td data-label="Product">
                         <SearchableSelect
                           value={item.product_id}
                           onChange={(newValue) => updateItem(index, 'product_id', newValue)}
@@ -1083,8 +1090,8 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
                         />
                         {formErrors[`item-product-${index}`] ? <div className="field-error">{formErrors[`item-product-${index}`]}</div> : null}
                       </td>
-                      <td><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
-                      <td>
+                      <td data-label="Quantity"><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
+                      <td data-label="">
                         <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                         </button>
@@ -1126,7 +1133,10 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
                   <thead><tr><th>Product</th><th>Quantity</th></tr></thead>
                   <tbody>
                     {(viewRecord.items || []).map((item) => (
-                      <tr key={item.id}><td>{item.product_name || `Product #${item.product_id}`}</td><td>{formatNumber(item.quantity)}</td></tr>
+                      <tr key={item.id}>
+                        <td data-label="Product">{item.product_name || `Product #${item.product_id}`}</td>
+                        <td data-label="Quantity">{formatNumber(item.quantity)}</td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
@@ -1424,7 +1434,7 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
                 <tbody>
                   {formValues.items.map((item, index) => (
                     <tr key={index}>
-                      <td>
+                      <td data-label="Product">
                         <SearchableSelect
                           value={item.product_id}
                           onChange={(newValue) => updateItem(index, 'product_id', newValue)}
@@ -1434,13 +1444,13 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
                         />
                         {formErrors[`item-product-${index}`] ? <div className="field-error">{formErrors[`item-product-${index}`]}</div> : null}
                       </td>
-                      <td><input type="number" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} placeholder="e.g. -5 or 5" /></td>
-                      <td>
+                      <td data-label="Quantity (+/-)"><input type="number" step="0.01" value={item.quantity} onChange={(e) => updateItem(index, 'quantity', e.target.value)} placeholder="e.g. -5 or 5" /></td>
+                      <td data-label="Type">
                         <select value={item.type} onChange={(e) => updateItem(index, 'type', e.target.value)}>
                           {ADJUSTMENT_TYPES.map((t) => <option key={t.value} value={t.value}>{t.label}</option>)}
                         </select>
                       </td>
-                      <td>
+                      <td data-label="">
                         <button type="button" className="item-remove-btn" onClick={() => removeItem(index)} title="Remove item">
                           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M18 6L6 18M6 6l12 12" /></svg>
                         </button>
@@ -1476,7 +1486,11 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
                   <thead><tr><th>Product</th><th>Quantity</th><th>Type</th></tr></thead>
                   <tbody>
                     {(viewRecord.items || []).map((item) => (
-                      <tr key={item.id}><td>{item.product_name || `Product #${item.product_id}`}</td><td>{formatNumber(item.quantity)}</td><td>{item.type || '-'}</td></tr>
+                      <tr key={item.id}>
+                        <td data-label="Product">{item.product_name || `Product #${item.product_id}`}</td>
+                        <td data-label="Quantity">{formatNumber(item.quantity)}</td>
+                        <td data-label="Type">{item.type || '-'}</td>
+                      </tr>
                     ))}
                   </tbody>
                 </table>
@@ -1728,9 +1742,9 @@ const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageErr
                   const diff = hasEntry ? Number(entered) - Number(row.quantity) : null;
                   return (
                     <tr key={row.product_id}>
-                      <td>{row.product_name}{row.product_code ? ` (${row.product_code})` : ''}</td>
-                      <td>{formatNumber(row.quantity)}</td>
-                      <td>
+                      <td data-label="Product">{row.product_name}{row.product_code ? ` (${row.product_code})` : ''}</td>
+                      <td data-label="System Qty">{formatNumber(row.quantity)}</td>
+                      <td data-label="Physical Qty">
                         <input
                           type="number"
                           step="0.01"
@@ -1739,7 +1753,7 @@ const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageErr
                           onChange={(e) => setCounts((prev) => ({ ...prev, [row.product_id]: e.target.value }))}
                         />
                       </td>
-                      <td style={diff ? { color: diff > 0 ? 'var(--md-success)' : 'var(--md-danger)', fontWeight: 600 } : undefined}>{hasEntry ? formatNumber(diff) : '-'}</td>
+                      <td data-label="Difference" style={diff ? { color: diff > 0 ? 'var(--md-success)' : 'var(--md-danger)', fontWeight: 600 } : undefined}>{hasEntry ? formatNumber(diff) : '-'}</td>
                     </tr>
                   );
                 })}

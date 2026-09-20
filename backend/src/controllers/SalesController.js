@@ -225,8 +225,16 @@ class SalesController {
       if (!allowedSortColumns.includes(sortBy)) sortBy = 'id';
       const sortOrder = order === 'ASC' ? 'ASC' : 'DESC';
 
+      // total_paid and total_returned let the list show a payment-progress
+      // bar and remaining balance per row without a separate request per
+      // invoice. What's actually still owed is net_amount minus any sales
+      // returns filed against this specific invoice, not just net_amount
+      // alone - a return credits down what's owed the same way a payment
+      // does (see SalesController.createReturn).
       const dataQuery = `
-        SELECT si.*, c.name as customer_name, w.name as warehouse_name, u.full_name as salesperson_name
+        SELECT si.*, c.name as customer_name, w.name as warehouse_name, u.full_name as salesperson_name,
+               COALESCE((SELECT SUM(amount) FROM payments WHERE transaction_type = 'sale' AND transaction_id = si.id), 0) as total_paid,
+               COALESCE((SELECT SUM(total_amount) FROM sales_returns WHERE invoice_id = si.id), 0) as total_returned
         FROM sales_invoices si
         LEFT JOIN customers c ON si.customer_id = c.id
         LEFT JOIN warehouses w ON si.warehouse_id = w.id

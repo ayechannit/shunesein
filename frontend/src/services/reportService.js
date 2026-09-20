@@ -55,6 +55,7 @@ export const fetchPoVarianceReport = async (token, params) => buildRequest(withQ
 export const fetchSupplierPriceTrend = async (token, params) => buildRequest(withQuery(`${API_ROOT}/reports/supplier-price-trend`, params), token);
 export const fetchCashFlowStatement = async (token, params) => buildRequest(withQuery(`${API_ROOT}/reports/cash-flow`, params), token);
 export const fetchFundTransferRegister = async (token, params) => buildRequest(withQuery(`${API_ROOT}/reports/fund-transfer-register`, params), token);
+export const fetchSupplierDepositRegister = async (token, params) => buildRequest(withQuery(`${API_ROOT}/reports/supplier-deposit-register`, params), token);
 export const fetchDeliveryPerformance = async (token, params) => buildRequest(withQuery(`${API_ROOT}/reports/delivery-performance`, params), token);
 export const fetchDocumentRegister = async (token, params) => buildRequest(withQuery(`${API_ROOT}/reports/document-register`, params), token);
 export const fetchSalespersonPerformance = async (token, params) => buildRequest(withQuery(`${API_ROOT}/reports/salesperson-performance`, params), token);

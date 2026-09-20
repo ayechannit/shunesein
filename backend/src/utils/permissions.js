@@ -18,6 +18,19 @@ module.exports = {
   MANAGE_PURCHASE_ORDERS: 'manage_purchase_orders',
   MANAGE_PURCHASE_VOUCHERS: 'manage_purchase_vouchers',
   MANAGE_PURCHASE_RETURNS: 'manage_purchase_returns',
+  // Receiving goods against a PO used to happen implicitly inside
+  // createVoucher - split into its own permission when Goods Receipts became
+  // a separate document (migration 030). Create+delete only, no edit: safely
+  // editing a receipt after stock has moved needs the same reversal
+  // complexity vouchers have and isn't worth it for v1.
+  MANAGE_GOODS_RECEIPTS: 'manage_goods_receipts',
+  MANAGE_GOODS_RECEIPTS_DELETE: 'manage_goods_receipts_delete',
+  // Goods Returns replace Purchase Returns' voucher-based linkage with the
+  // same PO-item-referencing pattern Goods Receipts use (migration 031).
+  MANAGE_GOODS_RETURNS: 'manage_goods_returns',
+  MANAGE_GOODS_RETURNS_DELETE: 'manage_goods_returns_delete',
+  MANAGE_SUPPLIER_DEPOSITS: 'manage_supplier_deposits',
+  MANAGE_SUPPLIER_DEPOSITS_DELETE: 'manage_supplier_deposits_delete',
   // Sales used to be gated by one process_sales permission for
   // Orders/Invoices/Returns - split per-item in migration 019.
   MANAGE_SALE_ORDERS: 'manage_sale_orders',
@@ -67,6 +80,7 @@ module.exports = {
   VIEW_REPORT_SUPPLIER_STATEMENT: 'view_report_supplier_statement',
   VIEW_REPORT_CASH_FLOW: 'view_report_cash_flow',
   VIEW_REPORT_FUND_TRANSFER_REGISTER: 'view_report_fund_transfer_register',
+  VIEW_REPORT_SUPPLIER_DEPOSIT_REGISTER: 'view_report_supplier_deposit_register',
   VIEW_REPORT_SALESPERSON_PERFORMANCE: 'view_report_salesperson_performance',
   VIEW_REPORT_CHART_OF_ACCOUNTS: 'view_report_chart_of_accounts',
   VIEW_REPORT_TRIAL_BALANCE: 'view_report_trial_balance',

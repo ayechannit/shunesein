@@ -40,7 +40,9 @@ export const MODULE_PERMISSIONS = {
 
   'purchase-orders': { write: 'manage_purchase_orders', edit: 'manage_purchase_orders_edit', delete: 'manage_purchase_orders_delete' },
   'purchase-vouchers': { write: 'manage_purchase_vouchers', edit: 'manage_purchase_vouchers_edit', delete: 'manage_purchase_vouchers_delete' },
-  'purchase-returns': { write: 'manage_purchase_returns', edit: 'manage_purchase_returns_edit', delete: 'manage_purchase_returns_delete' },
+  'goods-receipts': { write: 'manage_goods_receipts', delete: 'manage_goods_receipts_delete' },
+  'goods-returns': { write: 'manage_goods_returns', delete: 'manage_goods_returns_delete' },
+  'supplier-deposits': { write: 'manage_supplier_deposits', delete: 'manage_supplier_deposits_delete' },
 
   'sale-orders': { write: 'manage_sale_orders', edit: 'manage_sale_orders_edit', delete: 'manage_sale_orders_delete' },
   'sales-invoices': { write: 'manage_sales_invoices', edit: 'manage_sales_invoices_edit', delete: 'manage_sales_invoices_delete' },
@@ -84,6 +86,7 @@ export const MODULE_PERMISSIONS = {
   'report-supplier-price-trend': { view: 'view_report_supplier_price_trend' },
   'report-cash-flow': { view: 'view_report_cash_flow' },
   'report-fund-transfer-register': { view: 'view_report_fund_transfer_register' },
+  'report-supplier-deposit-register': { view: 'view_report_supplier_deposit_register' },
   'report-delivery-performance': { view: 'view_report_delivery_performance' },
   'report-document-register': { view: 'view_report_document_register' },
   'report-salesperson-performance': { view: 'view_report_salesperson_performance' },

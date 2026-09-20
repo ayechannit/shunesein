@@ -26,6 +26,7 @@ import {
   fetchSupplierPriceTrend,
   fetchCashFlowStatement,
   fetchFundTransferRegister,
+  fetchSupplierDepositRegister,
   fetchDeliveryPerformance,
   fetchDocumentRegister,
   fetchSalespersonPerformance,
@@ -280,7 +281,7 @@ const LowStockReport = ({ token, onLogout }) => {
 };
 
 // ─────────────────────────── Stock Movement ───────────────────────────
-const MOVEMENT_TYPES = ['purchase', 'sale', 'transfer_out', 'transfer_in', 'adjustment', 'production', 'production_reversal'];
+const MOVEMENT_TYPES = ['purchase', 'goods_receipt', 'goods_receipt_reversal', 'goods_return', 'goods_return_reversal', 'sale', 'transfer_out', 'transfer_in', 'adjustment', 'production', 'production_reversal'];
 
 const StockMovementReport = ({ token, onLogout, products, warehouses }) => {
   const [productId, setProductId] = useState('');
@@ -992,6 +993,9 @@ const OutstandingReport = ({ token, onLogout, onSelectCustomer, onSelectSupplier
         <div>
           <h2>{entityLabel} Outstanding (Aging)</h2>
           <p>Total: {formatNumber(section.total)}</p>
+          {section.total_deposit_available !== undefined ? (
+            <p>Supplier deposits available: {formatNumber(section.total_deposit_available)}</p>
+          ) : null}
         </div>
         <ExportCsvButton
           filename={`outstanding-${entityLabel.toLowerCase()}.csv`}
@@ -1081,7 +1085,7 @@ const OutstandingReport = ({ token, onLogout, onSelectCustomer, onSelectSupplier
         {!data ? (loading ? <div className="procurement-card">Loading report...</div> : null) : (
           appliedPartyType === 'customer'
             ? agingTable(data.customers, 'Customer', { label: 'Credit Limit', render: (row) => formatNumber(row.credit_limit) }, onSelectCustomer)
-            : agingTable(data.suppliers, 'Supplier', null, onSelectSupplier)
+            : agingTable(data.suppliers, 'Supplier', { label: 'Deposit Available', render: (row) => formatNumber(row.deposit_available) }, onSelectSupplier)
         )}
       </div>
     </>
@@ -2431,6 +2435,7 @@ const CashFlowStatementReport = ({ token, onLogout }) => {
                 <span style={{ fontWeight: 700 }}>Total Cash In</span><strong>{formatNumber(data.total_cash_in)}</strong>
               </div>
               <div className="procurement-summary-row" style={{ marginTop: '12px' }}><span>Supplier Payments Made</span><strong>({formatNumber(data.supplier_payments)})</strong></div>
+              <div className="procurement-summary-row"><span>Supplier Deposits Paid</span><strong>({formatNumber(data.supplier_deposits_paid)})</strong></div>
               <div className="procurement-summary-row"><span>Expenses</span><strong>({formatNumber(data.expenses)})</strong></div>
               <div className="procurement-summary-row" style={{ borderTop: '1px solid var(--md-border)', paddingTop: '8px', marginTop: '4px' }}>
                 <span style={{ fontWeight: 700 }}>Total Cash Out</span><strong>({formatNumber(data.total_cash_out)})</strong>
@@ -2530,6 +2535,77 @@ const FundTransferRegisterReport = ({ token, onLogout }) => {
                   <td data-label="To">{row.to_account}</td>
                   <td data-label="Amount" className="item-subtotal">{formatNumber(row.amount)}</td>
                   <td data-label="Remark">{row.remark || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        )}
+      </ReportShell>
+    </>
+  );
+};
+
+// ─────────────────────────── Supplier Deposit Register ───────────────────────────
+const SupplierDepositRegisterReport = ({ token, onLogout }) => {
+  const [from, setFrom] = useState(firstOfMonth());
+  const [to, setTo] = useState(today());
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState('');
+
+  const load = async () => {
+    setLoading(true);
+    setError('');
+    try {
+      setData(await fetchSupplierDepositRegister(token, { from, to }));
+    } catch (err) {
+      if (err.status === 401) return onLogout();
+      setError(err.message || 'Unable to load report');
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => { load(); }, [token]);
+
+  return (
+    <>
+      <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} onApply={load} />
+      <ReportShell loading={loading} error={error}>
+        {data ? (
+          <div className="procurement-summary" style={{ marginLeft: 0, marginBottom: '16px' }}>
+            <div className="procurement-summary-row"><span>Deposits</span><strong>{data.deposit_count}</strong></div>
+            <div className="procurement-summary-row"><span>Total Amount</span><strong>{formatNumber(data.total_amount)}</strong></div>
+            <div className="procurement-summary-row"><span>Used</span><strong>{formatNumber(data.total_used)}</strong></div>
+            <div className="procurement-summary-row"><span>Remaining</span><strong>{formatNumber(data.total_remaining)}</strong></div>
+          </div>
+        ) : null}
+        <ExportCsvButton
+          filename="supplier-deposit-register.csv"
+          rows={data?.items || []}
+          columns={[
+            { key: 'deposit_date', label: 'Date', value: (row) => formatDate(row.deposit_date) },
+            { key: 'supplier_name', label: 'Supplier' },
+            { key: 'account_name', label: 'Account' },
+            { key: 'amount', label: 'Amount' },
+            { key: 'used_amount', label: 'Used' },
+            { key: 'remaining_amount', label: 'Remaining' },
+            { key: 'reference_no', label: 'Reference' },
+          ]}
+        />
+        {!data || data.items.length === 0 ? <div className="payment-history-empty">No supplier deposits in this range.</div> : (
+          <table className="procurement-items-table">
+            <thead><tr><th>Date</th><th>Supplier</th><th>Account</th><th>Amount</th><th>Used</th><th>Remaining</th><th>Reference</th></tr></thead>
+            <tbody>
+              {data.items.map((row) => (
+                <tr key={row.id}>
+                  <td data-label="Date">{formatDate(row.deposit_date)}</td>
+                  <td data-label="Supplier">{row.supplier_name || '-'}</td>
+                  <td data-label="Account">{row.account_name || '-'}</td>
+                  <td data-label="Amount" className="item-subtotal">{formatNumber(row.amount)}</td>
+                  <td data-label="Used">{formatNumber(row.used_amount)}</td>
+                  <td data-label="Remaining">{formatNumber(row.remaining_amount)}</td>
+                  <td data-label="Reference">{row.reference_no || '-'}</td>
                 </tr>
               ))}
             </tbody>
@@ -3547,6 +3623,7 @@ const TITLES = {
   'supplier-price-trend': { title: 'Supplier Price Trend', description: "One product's purchase price across every voucher over time." },
   'cash-flow': { title: 'Cash Flow Statement', description: 'Cash in vs. cash out by month, on a cash basis.' },
   'fund-transfer-register': { title: 'Fund Transfer Register', description: 'Deposits, withdrawals, and transfers between accounts.' },
+  'supplier-deposit-register': { title: 'Supplier Deposit Register', description: 'Advance payments made to suppliers, and how much of each is still available.' },
   'delivery-performance': { title: 'Delivery Performance', description: 'On-time vs. failed delivery rate.' },
   'document-register': { title: 'Document Register', description: 'A single index across every PO, voucher, order, and invoice.' },
   'salesperson-performance': { title: 'Salesperson Performance', description: 'Revenue and invoice count by sales rep.' },
@@ -3651,6 +3728,7 @@ const Reports = ({ token, onLogout, embedded = false, defaultTab = 'current-stoc
       {activeTab === 'supplier-price-trend' && <SupplierPriceTrendReport {...shared} />}
       {activeTab === 'cash-flow' && <CashFlowStatementReport {...shared} />}
       {activeTab === 'fund-transfer-register' && <FundTransferRegisterReport {...shared} />}
+      {activeTab === 'supplier-deposit-register' && <SupplierDepositRegisterReport {...shared} />}
       {activeTab === 'delivery-performance' && <DeliveryPerformanceReport {...shared} />}
       {activeTab === 'document-register' && <DocumentRegisterReport {...shared} />}
       {activeTab === 'salesperson-performance' && <SalespersonPerformanceReport {...shared} />}

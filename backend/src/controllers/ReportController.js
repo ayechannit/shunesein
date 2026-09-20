@@ -208,10 +208,12 @@ class ReportController {
       const dataQuery = `
         SELECT st.*, p.name as product_name, p.product_code, p.unit, w.name as warehouse_name,
                p.cost_price, (st.quantity_change * p.cost_price) as value_change,
-               COALESCE(pvo.voucher_number, si2.invoice_number, sf.transfer_number, sa.adjustment_number, pb2.batch_number) as reference_number
+               COALESCE(gr.receipt_number, gret.return_number, pvo.voucher_number, si2.invoice_number, sf.transfer_number, sa.adjustment_number, pb2.batch_number) as reference_number
         FROM stock_transactions st
         JOIN products p ON st.product_id = p.id
         JOIN warehouses w ON st.warehouse_id = w.id
+        LEFT JOIN goods_receipts gr ON st.transaction_type IN ('goods_receipt', 'goods_receipt_reversal') AND st.reference_id = gr.id
+        LEFT JOIN goods_returns gret ON st.transaction_type IN ('goods_return', 'goods_return_reversal') AND st.reference_id = gret.id
         LEFT JOIN purchase_vouchers pvo ON st.transaction_type = 'purchase' AND st.reference_id = pvo.id
         LEFT JOIN sales_invoices si2 ON st.transaction_type = 'sale' AND st.reference_id = si2.id
         LEFT JOIN stock_transfers sf ON st.transaction_type IN ('transfer_in', 'transfer_out') AND st.reference_id = sf.id
@@ -550,7 +552,7 @@ class ReportController {
   // lag reality, whereas this is always correct by construction.
   getOutstanding = async (req, res) => {
     try {
-      const [customers, suppliers, customerTotals, supplierTotals] = await Promise.all([
+      const [customers, suppliers, customerTotals, supplierTotals, supplierDeposits] = await Promise.all([
         db.query(
           `WITH unpaid AS (
              SELECT inv.id, inv.customer_id, inv.invoice_date,
@@ -585,6 +587,20 @@ class ReportController {
         ),
         db.query(`SELECT COALESCE(SUM(outstanding_balance), 0) as total FROM customers`),
         db.query(`SELECT COALESCE(SUM(outstanding_balance), 0) as total FROM suppliers`),
+        // Advance payments still available to offset a future/existing
+        // payable - separate from outstanding_balance (see migration
+        // 026_add_supplier_deposits.sql), surfaced here so this report
+        // doesn't just show what's owed without showing what's already
+        // been paid ahead of time.
+        db.query(
+          `SELECT sd.supplier_id, SUM(sd.amount - COALESCE(used.total_used, 0)) as deposit_available
+           FROM supplier_deposits sd
+           LEFT JOIN (
+             SELECT deposit_id, SUM(amount) as total_used FROM payments WHERE deposit_id IS NOT NULL GROUP BY deposit_id
+           ) used ON used.deposit_id = sd.id
+           GROUP BY sd.supplier_id
+           HAVING SUM(sd.amount - COALESCE(used.total_used, 0)) > 0.01`
+        ),
       ]);
 
       const mapAging = (row) => ({
@@ -596,8 +612,13 @@ class ReportController {
         total_outstanding: toNumber(row.total_outstanding),
       });
 
+      const depositBySupplier = new Map(supplierDeposits.rows.map((row) => [row.supplier_id, toNumber(row.deposit_available)]));
       const customerItems = customers.rows.map(mapAging);
-      const supplierItems = suppliers.rows.map(mapAging);
+      const supplierItems = suppliers.rows.map(mapAging).map((row) => ({
+        ...row,
+        deposit_available: depositBySupplier.get(row.supplier_id) || 0,
+      }));
+      const totalDepositAvailable = supplierDeposits.rows.reduce((sum, row) => sum + toNumber(row.deposit_available), 0);
 
       const sumBucket = (items, key) => items.reduce((sum, row) => sum + row[key], 0);
       // Cross-checks the aging report (built from unpaid invoices/vouchers)
@@ -626,7 +647,10 @@ class ReportController {
 
       res.json({
         customers: buildSection(customerItems, toNumber(customerTotals.rows[0].total)),
-        suppliers: buildSection(supplierItems, toNumber(supplierTotals.rows[0].total)),
+        suppliers: {
+          ...buildSection(supplierItems, toNumber(supplierTotals.rows[0].total)),
+          total_deposit_available: totalDepositAvailable,
+        },
       });
     } catch (error) { res.status(500).json({ error: error.message }); }
   };
@@ -1313,12 +1337,17 @@ class ReportController {
     try {
       const { from, to } = resolveDateRange(req.query.from, req.query.to);
 
-      const [totals, byMonth, accounts] = await Promise.all([
+      // A payment with deposit_id set (see migration 026_add_supplier_deposits.sql)
+      // draws down a deposit already paid out earlier - no cash moves at the
+      // point it's applied to a voucher, so it must be excluded here to avoid
+      // double-counting the same cash outflow twice. The actual cash-out
+      // event is the deposit's own deposit_date, counted separately below.
+      const [totals, byMonth, accounts, depositTotals] = await Promise.all([
         db.query(
           `SELECT
              COALESCE((SELECT SUM(p.amount) FROM payments p JOIN sales_invoices inv ON p.transaction_id = inv.id WHERE p.transaction_type = 'sale' AND p.payment_date BETWEEN $1 AND $2), 0) as customer_payments,
              COALESCE((SELECT SUM(e.amount) FROM income_expense_entries e JOIN income_expense_categories c ON e.category_id = c.id WHERE c.type = 'income' AND e.date BETWEEN $1 AND $2), 0) as other_income,
-             COALESCE((SELECT SUM(p.amount) FROM payments p JOIN purchase_vouchers pv ON p.transaction_id = pv.id WHERE p.transaction_type = 'purchase' AND p.payment_date BETWEEN $1 AND $2), 0) as supplier_payments,
+             COALESCE((SELECT SUM(p.amount) FROM payments p JOIN purchase_vouchers pv ON p.transaction_id = pv.id WHERE p.transaction_type = 'purchase' AND p.deposit_id IS NULL AND p.payment_date BETWEEN $1 AND $2), 0) as supplier_payments,
              COALESCE((SELECT SUM(e.amount) FROM income_expense_entries e JOIN income_expense_categories c ON e.category_id = c.id WHERE c.type = 'expense' AND e.date BETWEEN $1 AND $2), 0) as expenses`,
           [from, to]
         ),
@@ -1335,17 +1364,22 @@ class ReportController {
              UNION ALL
              SELECT TO_CHAR(p.payment_date, 'YYYY-MM'), 0, p.amount
              FROM payments p JOIN purchase_vouchers pv ON p.transaction_id = pv.id
-             WHERE p.transaction_type = 'purchase' AND p.payment_date BETWEEN $1 AND $2
+             WHERE p.transaction_type = 'purchase' AND p.deposit_id IS NULL AND p.payment_date BETWEEN $1 AND $2
              UNION ALL
              SELECT TO_CHAR(e.date, 'YYYY-MM'), 0, e.amount
              FROM income_expense_entries e JOIN income_expense_categories c ON e.category_id = c.id
              WHERE c.type = 'expense' AND e.date BETWEEN $1 AND $2
+             UNION ALL
+             SELECT TO_CHAR(sd.deposit_date, 'YYYY-MM'), 0, sd.amount
+             FROM supplier_deposits sd
+             WHERE sd.deposit_date BETWEEN $1 AND $2
            ) combined
            GROUP BY period
            ORDER BY period`,
           [from, to]
         ),
         db.query(`SELECT COALESCE(SUM(balance), 0) as total FROM accounts`),
+        db.query(`SELECT COALESCE(SUM(amount), 0) as total FROM supplier_deposits WHERE deposit_date BETWEEN $1 AND $2`, [from, to]),
       ]);
 
       const t = totals.rows[0];
@@ -1353,8 +1387,9 @@ class ReportController {
       const otherIncome = toNumber(t.other_income);
       const supplierPayments = toNumber(t.supplier_payments);
       const expenses = toNumber(t.expenses);
+      const supplierDepositsPaid = toNumber(depositTotals.rows[0].total);
       const totalIn = customerPayments + otherIncome;
-      const totalOut = supplierPayments + expenses;
+      const totalOut = supplierPayments + expenses + supplierDepositsPaid;
 
       res.json({
         from,
@@ -1363,6 +1398,7 @@ class ReportController {
         other_income: otherIncome,
         total_cash_in: totalIn,
         supplier_payments: supplierPayments,
+        supplier_deposits_paid: supplierDepositsPaid,
         expenses,
         total_cash_out: totalOut,
         net_cash_flow: totalIn - totalOut,
@@ -1373,6 +1409,47 @@ class ReportController {
           cash_out: toNumber(row.cash_out),
           net: toNumber(row.cash_in) - toNumber(row.cash_out),
         })),
+      });
+    } catch (error) { res.status(500).json({ error: error.message }); }
+  };
+
+  // Supplier Deposit Register - an audit list over supplier_deposits (see
+  // migration 026_add_supplier_deposits.sql), mirroring the Fund Transfer
+  // Register below: every advance payment made to a supplier, how much of
+  // it has since been drawn down against a purchase payment, and what's
+  // still available.
+  getSupplierDepositRegister = async (req, res) => {
+    try {
+      const { from, to } = resolveDateRange(req.query.from, req.query.to);
+      const result = await db.query(
+        `SELECT sd.id, sd.deposit_date, s.name as supplier_name, a.name as account_name,
+                sd.amount, sd.reference_no,
+                COALESCE(used.total_used, 0) as used_amount,
+                sd.amount - COALESCE(used.total_used, 0) as remaining_amount
+         FROM supplier_deposits sd
+         LEFT JOIN suppliers s ON sd.supplier_id = s.id
+         LEFT JOIN accounts a ON sd.account_id = a.id
+         LEFT JOIN (
+           SELECT deposit_id, SUM(amount) as total_used FROM payments WHERE deposit_id IS NOT NULL GROUP BY deposit_id
+         ) used ON used.deposit_id = sd.id
+         WHERE sd.deposit_date BETWEEN $1 AND $2
+         ORDER BY sd.deposit_date DESC, sd.id DESC`,
+        [from, to]
+      );
+      const items = result.rows.map((row) => ({
+        ...row,
+        amount: toNumber(row.amount),
+        used_amount: toNumber(row.used_amount),
+        remaining_amount: toNumber(row.remaining_amount),
+      }));
+      res.json({
+        from,
+        to,
+        items,
+        deposit_count: items.length,
+        total_amount: items.reduce((sum, row) => sum + row.amount, 0),
+        total_used: items.reduce((sum, row) => sum + row.used_amount, 0),
+        total_remaining: items.reduce((sum, row) => sum + row.remaining_amount, 0),
       });
     } catch (error) { res.status(500).json({ error: error.message }); }
   };
@@ -1589,13 +1666,13 @@ class ReportController {
 
       const result = await db.query(
         `SELECT * FROM (
-           SELECT 'purchased' as source, pi.lot_number, pi.expiry_date, p.name as product_name, p.product_code, p.unit,
-                  w.name as warehouse_name, pi.quantity, pv.voucher_number as reference, pv.voucher_date as source_date
-           FROM purchase_items pi
-           JOIN purchase_vouchers pv ON pi.voucher_id = pv.id
-           JOIN products p ON pi.product_id = p.id
-           JOIN warehouses w ON pv.warehouse_id = w.id
-           WHERE pi.expiry_date IS NOT NULL
+           SELECT 'purchased' as source, gri.lot_number, gri.expiry_date, p.name as product_name, p.product_code, p.unit,
+                  w.name as warehouse_name, gri.quantity, gr.receipt_number as reference, gr.receipt_date as source_date
+           FROM goods_receipt_items gri
+           JOIN goods_receipts gr ON gri.receipt_id = gr.id
+           JOIN products p ON gri.product_id = p.id
+           JOIN warehouses w ON gri.warehouse_id = w.id
+           WHERE gri.expiry_date IS NOT NULL
            UNION ALL
            SELECT 'produced', pfg.lot_number, pfg.expiry_date, p.name, p.product_code, p.unit,
                   w.name, pfg.quantity, pb.batch_number, pb.end_date::date
