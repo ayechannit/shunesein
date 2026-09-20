@@ -313,7 +313,6 @@ const GoodsReceiptsTab = ({ token, onLogout, embedded, warehouses, hasPermission
     const nextErrors = {};
     if (sourceType === 'po' && !formValues.po_id) nextErrors.po_id = 'Purchase order is required.';
     if (sourceType === 'voucher' && !formValues.voucher_id) nextErrors.voucher_id = 'Voucher is required.';
-    if (!formValues.warehouse_id) nextErrors.warehouse_id = 'Warehouse is required.';
     if (!formValues.items || formValues.items.length === 0) nextErrors.items = 'At least one item is required.';
     (formValues.items || []).forEach((item, index) => {
       const lineId = sourceType === 'po' ? item.po_item_id : item.voucher_item_id;
@@ -487,7 +486,7 @@ const GoodsReceiptsTab = ({ token, onLogout, embedded, warehouses, hasPermission
               />
               {sourceType === 'po' ? (
                 <FormField
-                  field={{ key: 'po_id', label: 'Purchase Order', type: 'select', required: true, placeholder: 'Select an approved order' }}
+                  field={{ key: 'po_id', label: 'Purchase Order', type: 'searchable-select', required: true, placeholder: 'Select an approved order', searchPlaceholder: 'Search purchase orders...' }}
                   value={formValues.po_id}
                   error={formErrors.po_id}
                   onChange={(key, value) => handleSelectSource(value)}
@@ -495,14 +494,14 @@ const GoodsReceiptsTab = ({ token, onLogout, embedded, warehouses, hasPermission
                 />
               ) : (
                 <FormField
-                  field={{ key: 'voucher_id', label: 'Voucher', type: 'select', required: true, placeholder: 'Select a voucher billed with no PO' }}
+                  field={{ key: 'voucher_id', label: 'Voucher', type: 'searchable-select', required: true, placeholder: 'Select a voucher billed with no PO', searchPlaceholder: 'Search vouchers...' }}
                   value={formValues.voucher_id}
                   error={formErrors.voucher_id}
                   onChange={(key, value) => handleSelectSource(value)}
                   options={eligibleVouchers.map((v) => ({ value: v.id, label: `${v.voucher_number} - ${v.supplier_name || 'Unknown supplier'}` }))}
                 />
               )}
-              <FormField field={{ key: 'warehouse_id', label: 'Default Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'warehouse_id', label: 'Default Warehouse', type: 'select', placeholder: 'Optional - pre-fills each item row below' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
               <FormField field={{ key: 'receipt_date', label: 'Receipt Date', type: 'date' }} value={formValues.receipt_date} error={formErrors.receipt_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               <FormField
                 field={{ key: 'quality_rating', label: 'Quality Rating', type: 'select', placeholder: 'Select rating' }}
@@ -760,7 +759,16 @@ const GoodsReturnsTab = ({ token, onLogout, embedded, warehouses, hasPermission 
       const data = isVoucher ? await getVoucherForReturning(token, id) : await getOrderForReturning(token, id);
       const returnable = (data.items || []).filter((i) => Number(i.returnable_qty) > 0);
       setSourceItems(returnable);
-      setFormValues((previous) => ({ ...previous, items: [] }));
+      setFormValues((previous) => ({
+        ...previous,
+        items: returnable.map((line) => ({
+          po_item_id: isVoucher ? '' : String(line.id),
+          voucher_item_id: isVoucher ? String(line.id) : '',
+          product_id: String(line.product_id),
+          quantity: String(line.returnable_qty),
+          warehouse_id: '',
+        })),
+      }));
     } catch (error) {
       if (error.status === 401) return onLogout();
       setFormErrors({ submit: error.message || 'Unable to load that source document' });
@@ -774,7 +782,6 @@ const GoodsReturnsTab = ({ token, onLogout, embedded, warehouses, hasPermission 
     const nextErrors = {};
     if (sourceType === 'po' && !formValues.po_id) nextErrors.po_id = 'Purchase order is required.';
     if (sourceType === 'voucher' && !formValues.voucher_id) nextErrors.voucher_id = 'Voucher is required.';
-    if (!formValues.warehouse_id) nextErrors.warehouse_id = 'Warehouse is required.';
     if (!formValues.items || formValues.items.length === 0) nextErrors.items = 'At least one item is required.';
     (formValues.items || []).forEach((item, index) => {
       const lineId = sourceType === 'po' ? item.po_item_id : item.voucher_item_id;
@@ -947,7 +954,7 @@ const GoodsReturnsTab = ({ token, onLogout, embedded, warehouses, hasPermission 
               />
               {sourceType === 'po' ? (
                 <FormField
-                  field={{ key: 'po_id', label: 'Purchase Order', type: 'select', required: true, placeholder: 'Select an order' }}
+                  field={{ key: 'po_id', label: 'Purchase Order', type: 'searchable-select', required: true, placeholder: 'Select an order', searchPlaceholder: 'Search purchase orders...' }}
                   value={formValues.po_id}
                   error={formErrors.po_id}
                   onChange={(key, value) => handleSelectSource(value)}
@@ -955,14 +962,14 @@ const GoodsReturnsTab = ({ token, onLogout, embedded, warehouses, hasPermission 
                 />
               ) : (
                 <FormField
-                  field={{ key: 'voucher_id', label: 'Voucher', type: 'select', required: true, placeholder: 'Select a voucher billed with no PO' }}
+                  field={{ key: 'voucher_id', label: 'Voucher', type: 'searchable-select', required: true, placeholder: 'Select a voucher billed with no PO', searchPlaceholder: 'Search vouchers...' }}
                   value={formValues.voucher_id}
                   error={formErrors.voucher_id}
                   onChange={(key, value) => handleSelectSource(value)}
                   options={eligibleVouchers.map((v) => ({ value: v.id, label: `${v.voucher_number} - ${v.supplier_name || 'Unknown supplier'}` }))}
                 />
               )}
-              <FormField field={{ key: 'warehouse_id', label: 'Default Return-from Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'warehouse_id', label: 'Default Return-from Warehouse', type: 'select', placeholder: 'Optional - pre-fills each item row below' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
               <FormField field={{ key: 'return_date', label: 'Return Date', type: 'date' }} value={formValues.return_date} error={formErrors.return_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               <FormField field={{ key: 'reason', label: 'Reason', type: 'textarea' }} value={formValues.reason} error={formErrors.reason} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
             </div>

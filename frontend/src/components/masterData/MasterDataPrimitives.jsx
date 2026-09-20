@@ -550,6 +550,14 @@ export const FormField = ({
           aria-invalid={Boolean(error)}
           rows={field.rows || 4}
         />
+      ) : field.type === 'searchable-select' ? (
+        <SearchableSelect
+          value={value ?? ''}
+          onChange={(newValue) => onChange(field.key, newValue)}
+          options={sourceOptions}
+          placeholder={field.placeholder || 'Select an option'}
+          searchPlaceholder={field.searchPlaceholder || 'Search...'}
+        />
       ) : field.type === 'select' ? (
         <select
           id={inputId}
