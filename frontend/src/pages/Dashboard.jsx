@@ -275,7 +275,7 @@ const Dashboard = ({ token, onLogout, embedded = false }) => {
               )}
             </div>
 
-            <div className="procurement-card">
+            <div className="procurement-card dashboard-card-wide">
               <div className="table-headline">
                 <div>
                   <h2>Low Stock Alerts</h2>

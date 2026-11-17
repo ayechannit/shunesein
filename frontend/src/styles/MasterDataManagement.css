@@ -780,7 +780,8 @@ input[type="radio"] { accent-color: var(--md-primary); }
 /* The table row needs more room per card than the bar-chart row - three
    340px-minimum tables drop to two columns (and then one) instead of being
    squeezed until their number columns are clipped. */
-.dashboard-columns-tables { grid-template-columns: repeat(auto-fit, minmax(340px, 1fr)); }
+.dashboard-columns-tables { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+@media (max-width: 900px) { .dashboard-columns-tables { grid-template-columns: 1fr; } }
 
 /* Read-only summary tables on the dashboard. Deliberately NOT
    .procurement-items-table: that one is built for item-entry forms (its
@@ -1860,3 +1861,9 @@ tbody tr:hover .action-cell { background: var(--md-surface-soft); }
     padding-bottom: 8px;
   }
 }
+/* Low Stock Alerts has four columns of long product/warehouse names, so it
+   takes the full row under the two narrower summary tables instead of
+   squeezing into a third of it. */
+.dashboard-columns-tables .dashboard-card-wide { grid-column: 1 / -1; }
+.dashboard-card-wide .dashboard-table td:first-child,
+.dashboard-card-wide .dashboard-table td:nth-child(2) { min-width: 160px; }
