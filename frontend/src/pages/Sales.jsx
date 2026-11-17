@@ -642,10 +642,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   }, [token, invoicesPage, invoicesPageSize, invoicesSearch, invoicesSort, defaultTab]);
 
 
+  // Document numbers are generated once, when the form opens, so the number
+  // shown in the form is exactly the one saved. They used to be rebuilt from
+  // Date.now() on every render (changing as the user typed) and generated a
+  // third time on submit.
   const handleCreateOrder = () => {
     setFormType('orders');
     setFormMode('create');
-    setFormValues(emptyOrderForm());
+    setFormValues({ ...emptyOrderForm(), so_number: `SO-${Date.now()}` });
     setFormErrors({});
     setFormOpen(true);
   };
@@ -653,7 +657,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const handleCreateInvoice = () => {
     setFormType('invoices');
     setFormMode('create');
-    setFormValues(emptyInvoiceForm());
+    setFormValues({ ...emptyInvoiceForm(), invoice_number: `INV-${Date.now()}` });
     setFormErrors({});
     setFormOpen(true);
   };
@@ -758,7 +762,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           await updateSaleOrder(token, formValues.id, payload);
           setSuccess('Sale order updated.');
         } else {
-          payload.so_number = `SO-${Date.now()}`;
+          payload.so_number = formValues.so_number || `SO-${Date.now()}`;
           payload.order_date = formValues.order_date || new Date().toISOString().slice(0, 10);
           await createSaleOrder(token, payload);
           setSuccess('Sale order created.');
@@ -1132,7 +1136,8 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
       return formatDate(row.order_date);
     }
     if (column.key === 'created_by') {
-      return row.created_by || '-';
+      // Name from the list query; the bare id is only a fallback.
+      return row.created_by_name || row.created_by || '-';
     }
     return row[column.key] ?? '-';
   };
@@ -1211,7 +1216,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           <div className="procurement-grid">
             {isOrder ? (
               <>
-                <FormField field={{ key: 'so_number', label: 'SO Number', type: 'text', readOnly: true }} value={formValues.so_number || `SO-${Date.now()}`} error={formErrors.so_number} onChange={() => {}} />
+                <FormField field={{ key: 'so_number', label: 'SO Number', type: 'text', readOnly: true }} value={formValues.so_number || ''} error={formErrors.so_number} onChange={() => {}} />
                 <FormField field={{ key: 'customer_id', label: 'Customer', type: 'select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((customer) => ({ value: customer.id, label: customer.name }))} />
                 <FormField field={{ key: 'salesperson_id', label: 'Salesperson', type: 'select', placeholder: 'Unassigned' }} value={formValues.salesperson_id} error={formErrors.salesperson_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={salespeople.map((user) => ({ value: user.id, label: user.full_name || user.username }))} />
                 <FormField field={{ key: 'order_date', label: 'Order Date', type: 'date' }} value={formValues.order_date} error={formErrors.order_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
@@ -1219,7 +1224,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
               </>
             ) : (
               <>
-                <FormField field={{ key: 'invoice_number', label: 'Invoice Number', type: 'text', readOnly: true }} value={formValues.invoice_number || `INV-${Date.now()}`} error={formErrors.invoice_number} onChange={() => {}} />
+                <FormField field={{ key: 'invoice_number', label: 'Invoice Number', type: 'text', readOnly: true }} value={formValues.invoice_number || ''} error={formErrors.invoice_number} onChange={() => {}} />
                 <FormField field={{ key: 'customer_id', label: 'Customer', type: 'select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((customer) => ({ value: customer.id, label: customer.name }))} />
                 <FormField field={{ key: 'salesperson_id', label: 'Salesperson', type: 'select', placeholder: 'Unassigned' }} value={formValues.salesperson_id} error={formErrors.salesperson_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={salespeople.map((user) => ({ value: user.id, label: user.full_name || user.username }))} />
                 <FormField field={{ key: 'warehouse_id', label: 'Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />

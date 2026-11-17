@@ -1548,10 +1548,12 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
   }, [token, vouchersPage, vouchersPageSize, vouchersSearch, vouchersSort, defaultTab]);
 
 
+  // Numbers are generated once when the form opens, so the number shown is
+  // the number saved (it used to change on every render).
   const handleCreateOrder = () => {
     setFormType('orders');
     setFormMode('create');
-    setFormValues(emptyOrderForm());
+    setFormValues({ ...emptyOrderForm(), po_number: `PO-${Date.now()}` });
     setFormErrors({});
     setFormOpen(true);
   };
@@ -1559,7 +1561,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
   const handleCreateVoucher = () => {
     setFormType('vouchers');
     setFormMode('create');
-    setFormValues(emptyVoucherForm());
+    setFormValues({ ...emptyVoucherForm(), voucher_number: `PV-${Date.now()}` });
     setFormErrors({});
     setFormOpen(true);
   };
@@ -1632,7 +1634,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
           await updatePurchaseOrder(token, formValues.id, payload);
           setSuccess('Purchase order updated.');
         } else {
-          payload.po_number = `PO-${Date.now()}`;
+          payload.po_number = formValues.po_number || `PO-${Date.now()}`;
           payload.order_date = formValues.order_date || new Date().toISOString().slice(0, 10);
           await createPurchaseOrder(token, payload);
           setSuccess('Purchase order created.');
@@ -2001,7 +2003,8 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
       return formatDate(row.order_date);
     }
     if (column.key === 'created_by') {
-      return row.created_by || '-';
+      // Name from the list query; the bare id is only a fallback.
+      return row.created_by_name || row.created_by || '-';
     }
     return row[column.key] ?? '-';
   };
@@ -2080,7 +2083,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
           <div className="procurement-grid">
             {isOrder ? (
               <>
-                <FormField field={{ key: 'po_number', label: 'PO Number', type: 'text', readOnly: true }} value={formValues.po_number || `PO-${Date.now()}`} error={formErrors.po_number} onChange={() => {}} />
+                <FormField field={{ key: 'po_number', label: 'PO Number', type: 'text', readOnly: true }} value={formValues.po_number || ''} error={formErrors.po_number} onChange={() => {}} />
                 <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
                 <FormField field={{ key: 'order_date', label: 'Order Date', type: 'date' }} value={formValues.order_date} error={formErrors.order_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'expected_date', label: 'Expected Delivery Date', type: 'date' }} value={formValues.expected_date} error={formErrors.expected_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
@@ -2088,7 +2091,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
               </>
             ) : (
               <>
-                <FormField field={{ key: 'voucher_number', label: 'Voucher Number', type: 'text', readOnly: true }} value={formValues.voucher_number || `PV-${Date.now()}`} error={formErrors.voucher_number} onChange={() => {}} />
+                <FormField field={{ key: 'voucher_number', label: 'Voucher Number', type: 'text', readOnly: true }} value={formValues.voucher_number || ''} error={formErrors.voucher_number} onChange={() => {}} />
                 <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
                 <FormField field={{ key: 'voucher_date', label: 'Voucher Date', type: 'date' }} value={formValues.voucher_date} error={formErrors.voucher_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'received_date', label: 'Received Date', type: 'date' }} value={formValues.received_date} error={formErrors.received_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />

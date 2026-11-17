@@ -50,6 +50,8 @@ const ICON_PATHS = {
   copy: 'M8 17.7c0 .72.58 1.3 1.3 1.3h9.4c.72 0 1.3-.58 1.3-1.3V8.3c0-.72-.58-1.3-1.3-1.3h-9.4c-.72 0-1.3.58-1.3 1.3v9.4z M14.7 4h-9.4c-.72 0-1.3.58-1.3 1.3v9.4',
   alertTriangle: 'M10.29 3.86 1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0zM12 9v4M12 17h.01',
   logout: 'M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9',
+  // Was missing, so every Print menu item fell back to the dashboard (house) icon.
+  printer: 'M6 9V3h12v6M6 18H4a2 2 0 0 1-2-2v-5a2 2 0 0 1 2-2h16a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-2M6 14h12v7H6z',
 };
 
 export const AppIcon = ({ name, className = '' }) => (

@@ -53,9 +53,10 @@ class PurchaseController {
       const sortOrder = order === 'ASC' ? 'ASC' : 'DESC';
 
       const dataQuery = `
-        SELECT po.*, s.name as supplier_name 
+        SELECT po.*, s.name as supplier_name, cu.full_name as created_by_name
         FROM purchase_orders po
         LEFT JOIN suppliers s ON po.supplier_id = s.id
+        LEFT JOIN users cu ON po.created_by = cu.id
         ${whereClause}
         ORDER BY po.${sortBy} ${sortOrder}
         LIMIT ${limit} OFFSET ${offset}

@@ -21,6 +21,15 @@
   gap: 0.5rem;
 }
 
+/* List pages (orders, invoices, vouchers, returns...): the search card fills
+   the row and the "New ..." button sits top-right beside it. Without this
+   the card shrank to its content (~half the page) and the button floated
+   alone at the far edge. */
+.procurement-toolbar:has(> .search-toolbar) { align-items: flex-start; }
+.procurement-toolbar > .search-toolbar { flex: 1 1 560px; min-width: 0; }
+.procurement-toolbar > .search-toolbar > .search-card { width: 100%; }
+.procurement-toolbar > .procurement-actions { flex: 0 0 auto; }
+
 /* Filter fields in a toolbar row (Reports date-range/product/warehouse
    filters). flex-basis (not min-width) gives these a deterministic width
    regardless of parent flex sizing - min-width alone only sets a floor and

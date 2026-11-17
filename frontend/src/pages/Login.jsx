@@ -2,9 +2,12 @@ import React, { useState } from 'react';
 import '../styles/Login.css';
 import { API_ROOT } from '../config/api';
 import brandMark2x from '../assets/brand/shunesein-mark@2x.png';
+import { saveToken, clearToken, getRememberedUsername, setRememberedUsername } from '../utils/authStorage';
 
 const Login = ({ onLoginSuccess }) => {
-  const [username, setUsername] = useState('');
+  // Pre-filled when the last sign-in on this device ticked "Remember me".
+  const [username, setUsername] = useState(() => getRememberedUsername());
+  const [remember, setRemember] = useState(() => Boolean(getRememberedUsername()));
   const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -22,7 +25,7 @@ const Login = ({ onLoginSuccess }) => {
         headers: {
           'Content-Type': 'application/json'
         },
-        body: JSON.stringify({ username, password })
+        body: JSON.stringify({ username, password, remember })
       });
 
       const data = await response.json();
@@ -31,8 +34,8 @@ const Login = ({ onLoginSuccess }) => {
         throw new Error(data.message || data.error || 'Login failed');
       }
 
-      // Save token (e.g., to localStorage) if needed in real app
-      localStorage.setItem('token', data.token);
+      saveToken(data.token, remember);
+      setRememberedUsername(username.trim(), remember);
       if (onLoginSuccess) onLoginSuccess(data);
       
       // Show user information
@@ -70,7 +73,7 @@ const Login = ({ onLoginSuccess }) => {
                 setLoggedInUser(null);
                 setUsername('');
                 setPassword('');
-                localStorage.removeItem('token');
+                clearToken();
               }}
             >
               <span className="btn-text">Sign out</span>
@@ -97,13 +100,17 @@ const Login = ({ onLoginSuccess }) => {
             <p>Sign in to manage sales, stock and deliveries.</p>
           </div>
 
-          <form className="login-form" onSubmit={handleLogin}>
+          <form className="login-form" onSubmit={handleLogin} autoComplete="on">
             {error && <div style={{ color: 'var(--login-error)', textAlign: 'center', fontSize: '14px', marginBottom: '10px' }}>{error}</div>}
             
             <div className={`input-group ${username ? 'has-val' : ''}`}>
               <input
                 type="text"
                 id="username"
+                name="username"
+                autoComplete="username"
+                autoCapitalize="none"
+                spellCheck={false}
                 value={username}
                 onChange={(e) => setUsername(e.target.value)}
                 required
@@ -116,6 +123,8 @@ const Login = ({ onLoginSuccess }) => {
               <input
                 type="password"
                 id="password"
+                name="password"
+                autoComplete="current-password"
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 required
@@ -126,7 +135,11 @@ const Login = ({ onLoginSuccess }) => {
 
             <div className="form-actions">
               <label className="checkbox-wrap">
-                <input type="checkbox" />
+                <input
+                  type="checkbox"
+                  checked={remember}
+                  onChange={(event) => setRemember(event.target.checked)}
+                />
                 <span className="checkmark"></span>
                 Remember me
               </label>

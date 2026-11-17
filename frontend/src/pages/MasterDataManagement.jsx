@@ -694,7 +694,12 @@ const MasterDataManagement = ({ token, onLogout }) => {
   const totalPages = Math.max(1, Math.ceil(activeState.total / activeState.pageSize));
   const currentPage = Math.min(activeState.page, totalPages);
 
-  const breadcrumb = activeModule.group === 'Procurement' ? ['Dashboard', 'Procurement', activeModule.title] : ['Dashboard', 'Master Data', activeModule.title];
+  // Every module carries its nav section in `group`, so the breadcrumb always
+  // names the real section (it used to say "Master Data" for anything that
+  // was not Procurement).
+  const breadcrumb = activeModule.key === 'dashboard'
+    ? [activeModule.group || 'Overview']
+    : ['Dashboard', activeModule.group || 'Master Data', activeModule.title];
 
   const applySearch = () => {
     updateActiveState((previous) => ({
@@ -1432,6 +1437,14 @@ const MasterDataManagement = ({ token, onLogout }) => {
               <button type="button" className="master-button master-button-primary" onClick={acceptTimezoneSuggestion}>Use {tzSuggestion}</button>
             </div>
           </div>
+        ) : null}
+
+        {/* Embedded section pages (Sales, Procurement, Inventory, Finance,
+            Delivery, Reports, Audit, Dashboard) hide their own header when
+            rendered inside this shell, so the shell supplies it - without
+            this, ~60 pages showed no title at all. */}
+        {activeModule.renderType ? (
+          <PageHeader breadcrumb={breadcrumb} title={activeModule.title} description={activeModule.description} actions={null} />
         ) : null}
 
         {activeModule.renderType === 'procurement' ? (

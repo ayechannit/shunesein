@@ -4,6 +4,11 @@
 // margins configured under Settings > Print Page Setup via @page CSS.
 
 import { formatDate } from './datetime';
+import brandMark from '../assets/brand/shunesein-mark@2x.png';
+
+// The print window is a blank document written by hand, so the logo needs an
+// absolute URL - a relative one would not resolve against about:blank.
+const brandMarkUrl = () => new URL(brandMark, window.location.href).href;
 
 const formatNumber = (value) => {
   if (value === null || value === undefined || value === '') return '-';
@@ -69,8 +74,8 @@ export const openPrintDocument = ({
         @page { size: ${pageSize}; margin: ${pageMargin}; }
         * { box-sizing: border-box; }
         body {
-          font-family: 'Segoe UI', Arial, sans-serif;
-          color: #1a1d23;
+          font-family: 'Segoe UI', 'Myanmar Text', 'Noto Sans Myanmar', Arial, sans-serif;
+          color: #13301f;
           margin: 0;
           padding: 0;
           font-size: 13px;
@@ -80,50 +85,55 @@ export const openPrintDocument = ({
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          border-bottom: 3px solid #2563eb;
+          border-bottom: 3px solid #00733c;
           padding-bottom: 14px;
           margin-bottom: 20px;
         }
-        .brand { font-size: 20px; font-weight: 700; color: #2563eb; letter-spacing: -0.02em; }
-        .brand-subtitle { font-size: 11px; color: #6b7280; margin-top: 2px; }
+        .brand { font-size: 20px; font-weight: 700; color: #00733c; letter-spacing: -0.02em; }
+        .brand-subtitle { font-size: 11px; color: #57695e; margin-top: 2px; }
+        .brand-block { display: flex; align-items: center; gap: 10px; }
+        .brand-logo { width: 46px; height: 46px; display: block; }
         .doc-title { text-align: right; }
         .doc-title h1 { margin: 0; font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
-        .doc-title .doc-number { font-size: 14px; color: #2563eb; font-weight: 600; margin-top: 2px; }
+        .doc-title .doc-number { font-size: 14px; color: #00733c; font-weight: 600; margin-top: 2px; }
         .meta-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 10px 24px;
           margin-bottom: 22px;
           padding: 14px 16px;
-          background: #f8fafc;
+          background: #f3f6f4;
           border-radius: 6px;
         }
         .meta-item { display: flex; flex-direction: column; gap: 2px; }
-        .meta-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; font-weight: 600; }
+        .meta-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #57695e; font-weight: 600; }
         .meta-value { font-size: 13px; font-weight: 500; }
         table.items { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
         table.items th {
-          background: #2563eb; color: #fff; text-align: left;
+          background: #00733c; color: #fff; text-align: left;
           padding: 8px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;
         }
         table.items th.num, table.items td.num { text-align: right; }
-        table.items td.col-index { color: #9ca3af; width: 28px; }
-        table.items td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; }
-        table.items tbody tr:nth-child(even) { background: #f8fafc; }
+        table.items td.col-index { color: #93a39a; width: 28px; }
+        table.items td { padding: 8px 10px; border-bottom: 1px solid #d7dfda; }
+        table.items tbody tr:nth-child(even) { background: #f3f6f4; }
         .totals-block { margin-left: auto; width: 260px; margin-bottom: 20px; }
         .totals-row { display: flex; justify-content: space-between; padding: 5px 2px; font-size: 13px; }
-        .totals-row-net { border-top: 2px solid #1a1d23; margin-top: 4px; padding-top: 8px; font-size: 15px; }
-        .totals-row-net strong { color: #2563eb; }
-        .remark-block { margin-bottom: 20px; padding: 10px 14px; background: #f8fafc; border-left: 3px solid #2563eb; font-size: 12px; }
+        .totals-row-net { border-top: 2px solid #13301f; margin-top: 4px; padding-top: 8px; font-size: 15px; }
+        .totals-row-net strong { color: #00733c; }
+        .remark-block { margin-bottom: 20px; padding: 10px 14px; background: #f3f6f4; border-left: 3px solid #00733c; font-size: 12px; }
         .remark-block .meta-label { margin-bottom: 4px; }
-        .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between; }
+        .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #d7dfda; font-size: 10px; color: #93a39a; display: flex; justify-content: space-between; }
       </style>
     </head>
     <body>
       <div class="letterhead">
-        <div>
-          <div class="brand">Shune Sein</div>
-          <div class="brand-subtitle">Tea Leaf &amp; Fried Bean Manufacturing</div>
+        <div class="brand-block">
+          <img class="brand-logo" src="${brandMarkUrl()}" alt="" />
+          <div>
+            <div class="brand">Shune Sein</div>
+            <div class="brand-subtitle">ရွှန်းစိန် လက်ဖက်နှင့်အကြော်စုံ</div>
+          </div>
         </div>
         <div class="doc-title">
           <h1>${escapeHtml(documentTypeLabel)}</h1>
@@ -168,7 +178,7 @@ export const openPrintDocument = ({
         <span>Generated by Shune Sein</span>
         <span>${new Date().toLocaleString()}</span>
       </div>
-      <script>window.print();</script>
+      <script>window.addEventListener('load', function () { window.print(); });</script>
     </body>
     </html>
   `);
@@ -217,8 +227,8 @@ export const openPrintList = ({
         @page { size: ${pageSize}; margin: ${pageMargin}; }
         * { box-sizing: border-box; }
         body {
-          font-family: 'Segoe UI', Arial, sans-serif;
-          color: #1a1d23;
+          font-family: 'Segoe UI', 'Myanmar Text', 'Noto Sans Myanmar', Arial, sans-serif;
+          color: #13301f;
           margin: 0;
           padding: 0;
           font-size: 13px;
@@ -228,47 +238,52 @@ export const openPrintList = ({
           display: flex;
           justify-content: space-between;
           align-items: flex-start;
-          border-bottom: 3px solid #2563eb;
+          border-bottom: 3px solid #00733c;
           padding-bottom: 14px;
           margin-bottom: 20px;
         }
-        .brand { font-size: 20px; font-weight: 700; color: #2563eb; letter-spacing: -0.02em; }
-        .brand-subtitle { font-size: 11px; color: #6b7280; margin-top: 2px; }
+        .brand { font-size: 20px; font-weight: 700; color: #00733c; letter-spacing: -0.02em; }
+        .brand-subtitle { font-size: 11px; color: #57695e; margin-top: 2px; }
+        .brand-block { display: flex; align-items: center; gap: 10px; }
+        .brand-logo { width: 46px; height: 46px; display: block; }
         .doc-title { text-align: right; }
         .doc-title h1 { margin: 0; font-size: 18px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.03em; }
-        .doc-title .doc-number { font-size: 14px; color: #2563eb; font-weight: 600; margin-top: 2px; }
+        .doc-title .doc-number { font-size: 14px; color: #00733c; font-weight: 600; margin-top: 2px; }
         .meta-grid {
           display: grid;
           grid-template-columns: repeat(2, 1fr);
           gap: 10px 24px;
           margin-bottom: 22px;
           padding: 14px 16px;
-          background: #f8fafc;
+          background: #f3f6f4;
           border-radius: 6px;
         }
         .meta-item { display: flex; flex-direction: column; gap: 2px; }
-        .meta-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #6b7280; font-weight: 600; }
+        .meta-label { font-size: 10px; text-transform: uppercase; letter-spacing: 0.04em; color: #57695e; font-weight: 600; }
         .meta-value { font-size: 13px; font-weight: 500; }
         table.items { width: 100%; border-collapse: collapse; margin-bottom: 18px; }
         table.items th {
-          background: #2563eb; color: #fff; text-align: left;
+          background: #00733c; color: #fff; text-align: left;
           padding: 8px 10px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.03em;
         }
         table.items th.num, table.items td.num { text-align: right; }
-        table.items td.col-index { color: #9ca3af; width: 28px; }
-        table.items td { padding: 8px 10px; border-bottom: 1px solid #e5e7eb; }
-        table.items td.blank-cell { border-bottom: 1px solid #9ca3af; }
-        table.items tbody tr:nth-child(even) { background: #f8fafc; }
-        .remark-block { margin-bottom: 20px; padding: 10px 14px; background: #f8fafc; border-left: 3px solid #2563eb; font-size: 12px; }
+        table.items td.col-index { color: #93a39a; width: 28px; }
+        table.items td { padding: 8px 10px; border-bottom: 1px solid #d7dfda; }
+        table.items td.blank-cell { border-bottom: 1px solid #93a39a; }
+        table.items tbody tr:nth-child(even) { background: #f3f6f4; }
+        .remark-block { margin-bottom: 20px; padding: 10px 14px; background: #f3f6f4; border-left: 3px solid #00733c; font-size: 12px; }
         .remark-block .meta-label { margin-bottom: 4px; }
-        .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #e5e7eb; font-size: 10px; color: #9ca3af; display: flex; justify-content: space-between; }
+        .footer { margin-top: 30px; padding-top: 10px; border-top: 1px solid #d7dfda; font-size: 10px; color: #93a39a; display: flex; justify-content: space-between; }
       </style>
     </head>
     <body>
       <div class="letterhead">
-        <div>
-          <div class="brand">Shune Sein</div>
-          <div class="brand-subtitle">Tea Leaf &amp; Fried Bean Manufacturing</div>
+        <div class="brand-block">
+          <img class="brand-logo" src="${brandMarkUrl()}" alt="" />
+          <div>
+            <div class="brand">Shune Sein</div>
+            <div class="brand-subtitle">ရွှန်းစိန် လက်ဖက်နှင့်အကြော်စုံ</div>
+          </div>
         </div>
         <div class="doc-title">
           <h1>${escapeHtml(documentTypeLabel)}</h1>
@@ -303,7 +318,7 @@ export const openPrintList = ({
         <span>Generated by Shune Sein</span>
         <span>${new Date().toLocaleString()}</span>
       </div>
-      <script>window.print();</script>
+      <script>window.addEventListener('load', function () { window.print(); });</script>
     </body>
     </html>
   `);

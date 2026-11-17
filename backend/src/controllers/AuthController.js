@@ -8,6 +8,10 @@ class AuthController {
   login = async (req, res) => {
     try {
       const { username, password } = req.body;
+      // "Remember me" on the login form: a 30-day session on that device
+      // instead of the default 1 day. Strict boolean check so a stray truthy
+      // value can't silently extend a session.
+      const remember = req.body.remember === true;
       const query = `
         SELECT u.*, r.name as role_name
         FROM users u
@@ -32,7 +36,7 @@ class AuthController {
       const token = jwt.sign(
         { id: user.id, username: user.username, role_id: user.role_id, role_name: user.role_name },
         JWT_SECRET,
-        { expiresIn: '1d' }
+        { expiresIn: remember ? '30d' : '1d' }
       );
 
       // Update last login

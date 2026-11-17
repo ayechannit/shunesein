@@ -2,14 +2,15 @@ import React, { useEffect, useState } from 'react';
 import Login from './pages/Login';
 import MasterDataManagement from './pages/MasterDataManagement';
 import { API_ROOT } from './config/api';
+import { getToken, clearToken } from './utils/authStorage';
 import './App.css';
 
 function App() {
-  const [token, setToken] = useState(() => localStorage.getItem('token') || '');
+  const [token, setToken] = useState(() => getToken());
 
   useEffect(() => {
     const handleStorage = () => {
-      setToken(localStorage.getItem('token') || '');
+      setToken(getToken());
     };
 
     window.addEventListener('storage', handleStorage);
@@ -17,11 +18,11 @@ function App() {
   }, []);
 
   const handleLoginSuccess = () => {
-    setToken(localStorage.getItem('token') || '');
+    setToken(getToken());
   };
 
   const handleLogout = () => {
-    const currentToken = localStorage.getItem('token');
+    const currentToken = getToken();
     if (currentToken) {
       // Fire-and-forget: this is purely an audit entry (JWTs are stateless
       // here, nothing server-side to invalidate), so it must never block
@@ -31,7 +32,7 @@ function App() {
         headers: { Authorization: `Bearer ${currentToken}` },
       }).catch(() => {});
     }
-    localStorage.removeItem('token');
+    clearToken();
     setToken('');
   };
 

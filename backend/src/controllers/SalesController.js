@@ -20,10 +20,11 @@ class SalesController {
       const sortOrder = order === 'ASC' ? 'ASC' : 'DESC';
 
       const dataQuery = `
-        SELECT so.*, c.name as customer_name, u.full_name as salesperson_name
+        SELECT so.*, c.name as customer_name, u.full_name as salesperson_name, cu.full_name as created_by_name
         FROM sale_orders so
         LEFT JOIN customers c ON so.customer_id = c.id
         LEFT JOIN users u ON so.salesperson_id = u.id
+        LEFT JOIN users cu ON so.created_by = cu.id
         ${whereClause}
         ORDER BY so.${sortBy} ${sortOrder}
         LIMIT ${limit} OFFSET ${offset}

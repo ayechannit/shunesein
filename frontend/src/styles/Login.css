@@ -209,8 +209,19 @@
   user-select: none;
 }
 
+/* Visually hidden but still focusable and announced - display: none made
+   "Remember me" unreachable by keyboard and invisible to screen readers. */
 .checkbox-wrap input {
-  display: none;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
+}
+
+.checkbox-wrap input:focus-visible ~ .checkmark {
+  outline: 2px solid var(--login-primary);
+  outline-offset: 2px;
 }
 
 .checkmark {

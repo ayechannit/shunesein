@@ -224,7 +224,7 @@ const Dashboard = ({ token, onLogout, embedded = false }) => {
             </div>
           </div>
 
-          <div className="dashboard-columns">
+          <div className="dashboard-columns dashboard-columns-tables">
             <div className="procurement-card">
               <div className="table-headline">
                 <div>
@@ -235,18 +235,18 @@ const Dashboard = ({ token, onLogout, embedded = false }) => {
               {data.accounts.items.length === 0 ? (
                 <div className="payment-history-empty">No accounts set up yet.</div>
               ) : (
-                <table className="procurement-items-table">
-                  <thead><tr><th>Account</th><th>Type</th><th>Balance</th></tr></thead>
+                <div className="dashboard-table-wrap"><table className="dashboard-table">
+                  <thead><tr><th>Account</th><th>Type</th><th className="num">Balance</th></tr></thead>
                   <tbody>
                     {data.accounts.items.map((account) => (
                       <tr key={account.id}>
                         <td data-label="Account">{account.name}</td>
                         <td data-label="Type">{account.account_type || '-'}</td>
-                        <td data-label="Balance">{formatNumber(account.balance)}</td>
+                        <td data-label="Balance" className="num">{formatNumber(account.balance)}</td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </div>
 
@@ -260,18 +260,18 @@ const Dashboard = ({ token, onLogout, embedded = false }) => {
               {data.best_selling_products.length === 0 ? (
                 <div className="payment-history-empty">No sales recorded in the last 30 days.</div>
               ) : (
-                <table className="procurement-items-table">
-                  <thead><tr><th>Product</th><th>Qty Sold</th><th>Revenue</th></tr></thead>
+                <div className="dashboard-table-wrap"><table className="dashboard-table">
+                  <thead><tr><th>Product</th><th className="num">Qty Sold</th><th className="num">Revenue</th></tr></thead>
                   <tbody>
                     {data.best_selling_products.map((product) => (
                       <tr key={product.product_id}>
                         <td data-label="Product">{product.product_name}</td>
-                        <td data-label="Qty Sold">{formatNumber(product.total_quantity)}</td>
-                        <td data-label="Revenue">{formatNumber(product.total_revenue)}</td>
+                        <td data-label="Qty Sold" className="num">{formatNumber(product.total_quantity)}</td>
+                        <td data-label="Revenue" className="num">{formatNumber(product.total_revenue)}</td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </div>
 
@@ -285,19 +285,19 @@ const Dashboard = ({ token, onLogout, embedded = false }) => {
               {data.low_stock.items.length === 0 ? (
                 <div className="payment-history-empty">Nothing is low on stock.</div>
               ) : (
-                <table className="procurement-items-table">
-                  <thead><tr><th>Product</th><th>Warehouse</th><th>On Hand</th><th>Min. Level</th></tr></thead>
+                <div className="dashboard-table-wrap"><table className="dashboard-table">
+                  <thead><tr><th>Product</th><th>Warehouse</th><th className="num">On Hand</th><th className="num">Min. Level</th></tr></thead>
                   <tbody>
                     {data.low_stock.items.map((item, index) => (
                       <tr key={`${item.product_id}-${item.warehouse_name}-${index}`}>
                         <td data-label="Product">{item.product_name}</td>
                         <td data-label="Warehouse">{item.warehouse_name}</td>
-                        <td data-label="On Hand">{formatNumber(item.quantity)}</td>
-                        <td data-label="Min. Level">{formatNumber(item.min_stock_level)}</td>
+                        <td data-label="On Hand" className="num dashboard-table-alert">{formatNumber(item.quantity)}</td>
+                        <td data-label="Min. Level" className="num dashboard-table-muted">{formatNumber(item.min_stock_level)}</td>
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </table></div>
               )}
             </div>
           </div>
