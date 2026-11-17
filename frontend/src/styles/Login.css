@@ -2,33 +2,22 @@
    Glassmorphism Modern Login Theme
    ========================================================================= */
 
+/* Same palette as the app (see MasterDataManagement.css), taken from the
+   logo: a deep forest ground with a light card, so the logo sits on the
+   light background it was drawn for. */
 :root {
-  /* Matches --md-primary in MasterDataManagement.css so the login screen
-     reads as the same product as the app behind it, not a different theme. */
-  --login-primary: #2563eb;
-  --login-primary-hover: #1d4ed8;
-  --login-primary-rgb: 37, 99, 235;
-  --login-bg-1: #16171d;
-  --login-bg-2: #1f2028;
-  --login-card-bg: rgba(31, 32, 40, 0.4);
-  --login-card-border: rgba(255, 255, 255, 0.1);
-  --login-text: #f3f4f6;
-  --login-text-muted: #9ca3af;
-  --login-input-bg: rgba(0, 0, 0, 0.2);
-  --login-error: #ef4444;
-}
-
-/* Light Mode Overrides if required (Defaulting to premium dark glass theme) */
-@media (prefers-color-scheme: light) {
-  :root {
-    --login-bg-1: #f4f3ec;
-    --login-bg-2: #ffffff;
-    --login-card-bg: rgba(255, 255, 255, 0.6);
-    --login-card-border: rgba(0, 0, 0, 0.1);
-    --login-text: #08060d;
-    --login-text-muted: #6b6375;
-    --login-input-bg: rgba(255, 255, 255, 0.8);
-  }
+  --login-primary: #00733c;
+  --login-primary-hover: #005e31;
+  --login-primary-rgb: 0, 115, 60;
+  --login-leaf: #71bf45;
+  --login-bg-1: #0d3322;
+  --login-bg-2: #134a31;
+  --login-card-bg: #fcfdfc;
+  --login-card-border: #d7dfda;
+  --login-text: #13301f;
+  --login-text-muted: #57695e;
+  --login-input-bg: #f3f6f4;
+  --login-error: #a22f26;
 }
 
 /* Base Wrapper */
@@ -43,10 +32,7 @@
   display: flex;
   justify-content: center;
   align-items: center;
-  font-family:
-    system-ui,
-    -apple-system,
-    sans-serif;
+  font-family: 'Instrument Sans Variable', 'Noto Sans Myanmar', system-ui, sans-serif;
 }
 
 /* Animated Abstract Shapes */
@@ -71,7 +57,7 @@
 .shape-2 {
   width: 300px;
   height: 500px;
-  background: #00d2ff;
+  background: #71bf45;
   border-radius: 40% 60% 70% 30% / 40% 50% 60% 50%;
   bottom: -150px;
   right: -50px;
@@ -82,7 +68,7 @@
 .shape-3 {
   width: 200px;
   height: 200px;
-  background: #ff3b8f;
+  background: #00733c;
   border-radius: 50%;
   bottom: 20%;
   left: 20%;
@@ -119,7 +105,7 @@
   border: 1px solid var(--login-card-border);
   border-radius: 24px;
   padding: 48px 40px;
-  box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
+  box-shadow: 0 30px 60px -20px rgba(0, 0, 0, 0.45);
   animation: slideUpFade 0.8s cubic-bezier(0.16, 1, 0.3, 1) forwards;
   opacity: 0;
   transform: translateY(30px);
@@ -177,12 +163,13 @@
 }
 
 .input-group input:hover {
-  background: rgba(255, 255, 255, 0.05);
+  border-color: var(--md-border-strong, #bfcbc3);
 }
 
 .input-group input:focus {
   border-color: var(--login-primary);
-  background: transparent;
+  background: #ffffff;
+  box-shadow: 0 0 0 3px rgba(var(--login-primary-rgb), 0.15);
 }
 
 .input-group label {
@@ -202,8 +189,6 @@
   top: 8px;
   font-size: 11px;
   font-weight: 600;
-  text-transform: uppercase;
-  letter-spacing: 0.5px;
   color: var(--login-primary);
 }
 
@@ -284,7 +269,7 @@
   border: none;
   border-radius: 12px;
   background: var(--login-primary);
-  color: #fff;
+  color: #ffffff;
   font-size: 16px;
   font-weight: 600;
   cursor: pointer;
@@ -367,4 +352,23 @@
     align-items: flex-start;
     gap: 10px;
   }
+}
+
+.login-logo {
+  display: block;
+  width: 96px;
+  height: 96px;
+  margin: 0 auto 12px;
+}
+
+.login-header .login-tagline {
+  margin: 0 0 14px;
+  font-family: 'Noto Sans Myanmar', 'Myanmar Text', 'Padauk', sans-serif;
+  font-size: 14px;
+  line-height: 1.7;
+  color: var(--login-primary);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .bg-shape, .login-card { animation: none; opacity: 1; transform: none; }
 }

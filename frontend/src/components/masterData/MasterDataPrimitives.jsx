@@ -1,5 +1,7 @@
 import React, { cloneElement, createContext, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import brandMark from '../../assets/brand/shunesein-mark.png';
+import brandMark2x from '../../assets/brand/shunesein-mark@2x.png';
 
 // Lets a DropdownMenu opened from inside a modal (a) portal into a stable
 // viewport-covering layer instead of document.body, so it stacks above the
@@ -145,6 +147,10 @@ export const AppButton = ({
   </button>
 );
 
+// Light, quiet sidebar: the logo sits on the light ground it was drawn for,
+// the current page is a soft green pill, and a "Find a page" filter jumps
+// straight to any screen (Reports alone runs to dozens of items, so scanning
+// collapsed groups was the slow path).
 export const Sidebar = ({
   sections,
   activeKey,
@@ -160,101 +166,167 @@ export const Sidebar = ({
   onClose,
   collapsed = false,
   onToggleCollapse,
-}) => (
-  <aside className={`master-sidebar ${isOpen ? 'is-open' : ''} ${collapsed ? 'is-collapsed' : ''} ${className}`.trim()}>
-    <div className="sidebar-header">
-      <div className="sidebar-brand">
-        <div className="brand-mark">SN</div>
-        {!collapsed ? (
-          <div>
-            <strong>Shune Sein</strong>
-            <span>ရွှန်းစိန် လက်ဖက်နှင်အကြော်စုံ</span>
-          </div>
-        ) : null}
+}) => {
+  const [query, setQuery] = useState('');
+  const needle = collapsed ? '' : query.trim().toLowerCase();
+
+  const visible = useMemo(() => {
+    if (!needle) return sections;
+    return sections
+      .map((section) => ({
+        ...section,
+        items: section.items.filter(
+          (item) => item.label.toLowerCase().includes(needle) || section.title.toLowerCase().includes(needle),
+        ),
+      }))
+      .filter((section) => section.items.length > 0);
+  }, [sections, needle]);
+
+  const displayName = userLabel || 'admin';
+  const displayRole = userRole || 'Owner';
+
+  const selectItem = (key) => {
+    onSelectItem(key);
+    setQuery('');
+    if (onClose) onClose();
+  };
+
+  return (
+    <aside className={`master-sidebar ${isOpen ? 'is-open' : ''} ${collapsed ? 'is-collapsed' : ''} ${className}`.trim()}>
+      <div className="sidebar-header">
+        <div className="sidebar-brand">
+          <img
+            className="brand-logo"
+            src={brandMark}
+            srcSet={`${brandMark} 1x, ${brandMark2x} 2x`}
+            alt={collapsed ? 'Shune Sein' : ''}
+          />
+          {!collapsed ? (
+            <div className="brand-copy">
+              <strong>Shune Sein</strong>
+              <span lang="my">ရွှန်းစိန် လက်ဖက်နှင့်အကြော်စုံ</span>
+            </div>
+          ) : null}
+        </div>
+        <div className="sidebar-header-actions">
+          {onToggleCollapse ? (
+            <button
+              type="button"
+              className="sidebar-icon-button sidebar-collapse-toggle"
+              onClick={onToggleCollapse}
+              aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+              title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
+            >
+              <ChevronIcon className={collapsed ? 'is-pointing-right' : 'is-pointing-left'} />
+            </button>
+          ) : null}
+          {onClose ? (
+            <button type="button" className="sidebar-icon-button sidebar-close" onClick={onClose} aria-label="Close navigation">
+              <CloseIcon className="button-icon" />
+            </button>
+          ) : null}
+        </div>
       </div>
-      <div className="sidebar-header-actions">
-        {onToggleCollapse ? (
-          <button
-            type="button"
-            className="sidebar-collapse-toggle"
-            onClick={onToggleCollapse}
-            aria-label={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-            title={collapsed ? 'Expand navigation' : 'Collapse navigation'}
-          >
-            <ChevronIcon className={collapsed ? 'is-pointing-right' : 'is-pointing-left'} />
-          </button>
-        ) : null}
-        {onClose ? (
-          <button type="button" className="sidebar-close" onClick={onClose} aria-label="Close navigation">
-            <CloseIcon className="button-icon" />
-          </button>
-        ) : null}
-      </div>
-    </div>
 
-    <nav className="sidebar-nav">
-      {sections.map((section) => {
-        const expanded = collapsed ? true : (expandedSections[section.key] ?? true);
+      {!collapsed ? (
+        <div className="sidebar-search">
+          <SearchIcon className="sidebar-search-icon" />
+          <input
+            type="text"
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === 'Escape') setQuery('');
+              if (event.key === 'Enter' && visible[0]?.items[0]) selectItem(visible[0].items[0].key);
+            }}
+            placeholder="Find a page"
+            aria-label="Find a page"
+          />
+        </div>
+      ) : null}
 
-        return (
-          <div key={section.key} className="nav-group">
-            {!collapsed ? (
-              <button type="button" className="nav-group-toggle" onClick={() => onToggleSection(section.key)}>
-                <span>{section.title}</span>
-                <ChevronIcon className={`nav-chevron ${expanded ? 'is-open' : ''}`} />
-              </button>
-            ) : null}
+      <nav className="sidebar-nav" aria-label="Main">
+        {visible.map((section) => {
+          const expanded = collapsed || needle ? true : (expandedSections[section.key] ?? true);
+          const holdsActive = section.items.some((item) => item.key === activeKey);
 
-            <div className={`nav-group-body ${expanded ? 'is-open' : ''}`}>
-              {section.items.map((item) => (
+          return (
+            <div key={section.key} className="nav-group">
+              {!collapsed ? (
                 <button
                   type="button"
-                  key={item.key}
-                  className={`nav-item ${activeKey === item.key ? 'active' : ''}`}
-                  title={collapsed ? item.label : undefined}
-                  onClick={() => {
-                    onSelectItem(item.key);
-                    if (onClose) {
-                      onClose();
-                    }
-                  }}
+                  className="nav-group-toggle"
+                  onClick={() => onToggleSection(section.key)}
+                  aria-expanded={expanded}
+                  disabled={Boolean(needle)}
                 >
-                  <span className="nav-icon">
-                    <AppIcon name={item.icon} />
-                  </span>
-                  {!collapsed ? <span className="nav-label">{item.label}</span> : null}
+                  <span className="nav-group-title">{section.title}</span>
+                  {!expanded && holdsActive ? <span className="nav-group-dot" aria-hidden="true" /> : null}
+                  {!expanded ? <span className="nav-group-count">{section.items.length}</span> : null}
+                  <ChevronIcon className={`nav-chevron ${expanded ? 'is-open' : ''}`} />
                 </button>
-              ))}
+              ) : null}
+
+              <div className={`nav-group-body ${expanded ? 'is-open' : ''}`}>
+                {section.items.map((item) => {
+                  const active = activeKey === item.key;
+                  return (
+                    <button
+                      type="button"
+                      key={item.key}
+                      className={`nav-item ${active ? 'active' : ''}`}
+                      aria-current={active ? 'page' : undefined}
+                      title={collapsed ? item.label : undefined}
+                      tabIndex={expanded ? undefined : -1}
+                      onClick={() => selectItem(item.key)}
+                    >
+                      <span className="nav-icon">
+                        <AppIcon name={item.icon} />
+                      </span>
+                      {!collapsed ? <span className="nav-label">{item.label}</span> : null}
+                    </button>
+                  );
+                })}
+              </div>
             </div>
-          </div>
-        );
-      })}
-    </nav>
-
-    <div className="sidebar-footer">
-      <button
-        type="button"
-        className="profile-card profile-card-button"
-        onClick={onOpenProfile}
-        disabled={!onOpenProfile}
-        aria-label="Edit my profile"
-        title={collapsed ? `${userLabel || 'admin'} - ${userRole || 'Owner'}` : undefined}
-      >
-        <div className="avatar">{(userLabel || 'AD').slice(0, 2).toUpperCase()}</div>
-        {!collapsed ? (
-          <div>
-            <strong>{userLabel || 'admin'}</strong>
-            <span>{userRole || 'Owner'}</span>
-          </div>
+          );
+        })}
+        {needle && visible.length === 0 ? (
+          <p className="sidebar-empty">No page matches “{query.trim()}”. Try a shorter word.</p>
         ) : null}
-      </button>
+      </nav>
 
-      <button type="button" className="master-button master-button-secondary sidebar-signout" onClick={onLogout} title="Sign out">
-        {collapsed ? <LogoutIcon className="button-icon" /> : 'Sign out'}
-      </button>
-    </div>
-  </aside>
-);
+      <div className="sidebar-footer">
+        <button
+          type="button"
+          className="profile-card profile-card-button"
+          onClick={onOpenProfile}
+          disabled={!onOpenProfile}
+          aria-label="Edit my profile"
+          title={collapsed ? `${displayName} - ${displayRole}` : 'Edit my profile'}
+        >
+          <span className="avatar">{displayName.slice(0, 2).toUpperCase()}</span>
+          {!collapsed ? (
+            <span className="profile-copy">
+              <strong>{displayName}</strong>
+              <span>{displayRole}</span>
+            </span>
+          ) : null}
+        </button>
+
+        <button
+          type="button"
+          className="sidebar-icon-button sidebar-signout"
+          onClick={onLogout}
+          aria-label="Sign out"
+          title="Sign out"
+        >
+          <LogoutIcon className="button-icon" />
+        </button>
+      </div>
+    </aside>
+  );
+};
 
 export const PageHeader = ({ breadcrumb, title, description, actions }) => (
   <section className="page-header">

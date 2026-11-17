@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import '../styles/Login.css';
 import { API_ROOT } from '../config/api';
+import brandMark2x from '../assets/brand/shunesein-mark@2x.png';
 
 const Login = ({ onLoginSuccess }) => {
   const [username, setUsername] = useState('');
@@ -53,6 +54,7 @@ const Login = ({ onLoginSuccess }) => {
         <div className="login-container">
           <div className="login-card" style={{ textAlign: 'center' }}>
             <div className="login-header">
+              <img className="login-logo" src={brandMark2x} alt="" />
               <h2>Welcome, {loggedInUser.full_name}!</h2>
               <p>You have successfully logged in.</p>
             </div>
@@ -71,7 +73,7 @@ const Login = ({ onLoginSuccess }) => {
                 localStorage.removeItem('token');
               }}
             >
-              <span className="btn-text">Sign Out</span>
+              <span className="btn-text">Sign out</span>
             </button>
           </div>
         </div>
@@ -89,8 +91,10 @@ const Login = ({ onLoginSuccess }) => {
       <div className="login-container">
         <div className="login-card">
           <div className="login-header">
-            <h2>Welcome Back</h2>
-            <p>Tea Leaf & Fried Bean Manufacturing System</p>
+              <img className="login-logo" src={brandMark2x} alt="" />
+            <h2>Shune Sein</h2>
+            <p className="login-tagline">ရွှန်းစိန် လက်ဖက်နှင့်အကြော်စုံ</p>
+            <p>Sign in to manage sales, stock and deliveries.</p>
           </div>
 
           <form className="login-form" onSubmit={handleLogin}>
@@ -131,7 +135,7 @@ const Login = ({ onLoginSuccess }) => {
                 className="forgot-link"
                 onClick={() => setShowForgotHint(true)}
               >
-                Forgot Password?
+                Forgot password?
               </button>
             </div>
 
@@ -142,7 +146,7 @@ const Login = ({ onLoginSuccess }) => {
             )}
 
             <button type="submit" className={`btn-login ${loading ? 'loading' : ''}`} disabled={loading}>
-              <span className="btn-text">{loading ? 'Authenticating...' : 'Sign In'}</span>
+              <span className="btn-text">{loading ? 'Signing in…' : 'Sign in'}</span>
               <div className="btn-spinner"></div>
             </button>
           </form>

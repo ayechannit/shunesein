@@ -46,11 +46,11 @@
 
 /* ─── Items Section Card ─── */
 .procurement-card {
-  background: #fff;
-  border: 1px solid #e5e7eb;
+  background: var(--md-surface);
+  border: 1px solid var(--md-border);
   border-radius: 18px;
   padding: 1.25rem 1.25rem 0.5rem;
-  box-shadow: 0 10px 30px rgba(15, 23, 42, 0.04);
+  box-shadow: 0 10px 30px rgba(31, 45, 30, 0.04);
   overflow: hidden;
 }
 
@@ -61,7 +61,7 @@
 .procurement-card .procurement-toolbar strong {
   font-size: 15px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--md-text);
   letter-spacing: -0.01em;
 }
 
@@ -99,11 +99,9 @@
   padding: 0.7rem 0.75rem;
   font-size: 12px;
   font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.04em;
-  color: #6b7280;
-  background: #f8fafc;
-  border-bottom: 1px solid #e5e7eb;
+  color: var(--md-muted);
+  background: var(--md-surface-soft);
+  border-bottom: 1px solid var(--md-border);
   text-align: left;
   position: sticky;
   top: 0;
@@ -122,12 +120,12 @@
 }
 
 .procurement-items-table tbody tr:hover {
-  background: #f8fbff;
+  background: var(--md-surface-soft);
 }
 
 .procurement-items-table tbody td {
   padding: 0.75rem;
-  border-bottom: 1px solid #f1f3f5;
+  border-bottom: 1px solid var(--md-border-faint);
   vertical-align: middle;
   font-size: 14px;
 }
@@ -186,10 +184,10 @@
   width: 100%;
   height: 38px;
   padding: 0 10px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--md-border);
   border-radius: 10px;
-  background: #fff;
-  color: #0f172a;
+  background: var(--md-surface);
+  color: var(--md-text);
   font-size: 14px;
   outline: none;
   transition: border-color 160ms ease, box-shadow 160ms ease;
@@ -208,14 +206,14 @@
 .procurement-items-table input[type="number"]:focus,
 .procurement-items-table input[type="text"]:focus,
 .procurement-items-table input[type="date"]:focus {
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: var(--md-primary-line);
+  box-shadow: 0 0 0 3px var(--md-focus-ring);
 }
 
 /* Subtotal text */
 .procurement-items-table .item-subtotal {
   font-weight: 600;
-  color: #0f172a;
+  color: var(--md-text);
   font-variant-numeric: tabular-nums;
 }
 
@@ -227,13 +225,13 @@
   padding: 0;
   margin: 0;
   font: inherit;
-  color: var(--md-primary, #2563eb);
+  color: var(--md-primary);
   text-decoration: underline;
   text-underline-offset: 2px;
   cursor: pointer;
 }
 .link-button:hover {
-  color: var(--md-info, #0284c7);
+  color: var(--md-info);
 }
 
 /* Remove button inline */
@@ -253,14 +251,14 @@
 
 .item-remove-btn:hover {
   background: var(--md-danger-soft);
-  border-color: #fecaca;
+  border-color: var(--md-danger-line);
 }
 
 /* ─── Product hint ─── */
 .field-hint {
   margin-top: 4px;
   font-size: 12px;
-  color: #6b7280;
+  color: var(--md-muted);
 }
 
 /* ─── Summary Section ─── */
@@ -270,8 +268,8 @@
   max-width: 360px;
   margin-left: auto;
   padding: 1rem 1.25rem;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
+  background: var(--md-surface-soft);
+  border: 1px solid var(--md-border);
   border-radius: 14px;
   width: 100%;
   box-sizing: border-box;
@@ -286,13 +284,13 @@
 
 .procurement-summary-row span {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--md-muted);
   font-weight: 500;
 }
 
 .procurement-summary-row strong {
   font-size: 15px;
-  color: #0f172a;
+  color: var(--md-text);
   font-weight: 700;
   font-variant-numeric: tabular-nums;
 }
@@ -310,7 +308,7 @@
 
 .summary-currency {
   font-size: 14px;
-  color: #6b7280;
+  color: var(--md-muted);
   font-weight: 600;
 }
 
@@ -318,10 +316,10 @@
   width: 100px;
   height: 32px;
   padding: 0 8px;
-  border: 1px solid #e5e7eb;
+  border: 1px solid var(--md-border);
   border-radius: 8px;
-  background: #fff;
-  color: #0f172a;
+  background: var(--md-surface);
+  color: var(--md-text);
   font-size: 14px;
   font-weight: 600;
   text-align: right;
@@ -332,30 +330,30 @@
 }
 
 .summary-input:focus {
-  border-color: #93c5fd;
-  box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
+  border-color: var(--md-primary-line);
+  box-shadow: 0 0 0 3px var(--md-focus-ring);
 }
 
 .summary-input::placeholder {
-  color: #cbd5e1;
+  color: var(--md-faint);
 }
 
 /* Net amount row */
 .procurement-summary-net {
   padding-top: 0.6rem;
-  border-top: 1px solid #e5e7eb;
+  border-top: 1px solid var(--md-border);
   margin-top: 0.25rem;
 }
 
 .procurement-summary-net span {
   font-size: 15px;
-  color: #0f172a;
+  color: var(--md-text);
   font-weight: 700;
 }
 
 .procurement-summary-net strong {
   font-size: 18px;
-  color: #2563eb;
+  color: var(--md-primary);
 }
 
 /* ─── Responsive: collapse items table to cards on mobile ─── */
@@ -389,14 +387,14 @@
 
   .procurement-items-table tbody tr {
     padding: 0.85rem;
-    background: #fff;
-    border: 1px solid #e5e7eb;
+    background: var(--md-surface);
+    border: 1px solid var(--md-border);
     border-radius: 14px;
     margin-bottom: 0.75rem;
   }
 
   .procurement-items-table tbody tr:hover {
-    background: #f8fbff;
+    background: var(--md-surface-soft);
   }
 
   .procurement-items-table tbody td {
@@ -422,9 +420,8 @@
     content: attr(data-label);
     font-size: 12px;
     font-weight: 700;
-    text-transform: uppercase;
     letter-spacing: 0.03em;
-    color: #6b7280;
+    color: var(--md-muted);
     min-width: 80px;
     flex-shrink: 0;
   }
@@ -474,8 +471,8 @@
 .payment-form-card {
   margin-top: 16px;
   padding: 16px;
-  background: #f8fafc;
-  border: 1px solid #e5e7eb;
+  background: var(--md-surface-soft);
+  border: 1px solid var(--md-border);
   border-radius: 14px;
 }
 
@@ -483,13 +480,13 @@
   margin: 0 0 12px;
   font-size: 14px;
   font-weight: 700;
-  color: #0f172a;
+  color: var(--md-text);
 }
 
 .payment-history-empty {
   padding: 8px 0;
   font-size: 14px;
-  color: #6b7280;
+  color: var(--md-muted);
 }
 
 /* ─── Payment progress bar + balance-due pill (voucher/invoice list tables) ─── */
@@ -503,7 +500,7 @@
   flex: 1;
   height: 6px;
   border-radius: 999px;
-  background: var(--md-border, #e2e5ea);
+  background: var(--md-border);
   overflow: hidden;
 }
 .payment-progress-fill {
@@ -511,9 +508,9 @@
   border-radius: 999px;
   transition: width 260ms ease;
 }
-.payment-progress-fill-accent { background: linear-gradient(90deg, #60a5fa, var(--md-primary, #2563eb)); }
-.payment-progress-fill-success { background: linear-gradient(90deg, #4ade80, var(--md-success, #16a34a)); }
-.payment-progress-fill-muted { background: var(--md-border-strong, #cdd2d9); }
+.payment-progress-fill-accent { background: linear-gradient(90deg, var(--md-primary-line), var(--md-primary)); }
+.payment-progress-fill-success { background: linear-gradient(90deg, var(--md-success-line), var(--md-success)); }
+.payment-progress-fill-muted { background: var(--md-border-strong); }
 .payment-progress-percent {
   flex: 0 0 auto;
   min-width: 32px;
@@ -521,7 +518,7 @@
   font-weight: 700;
   font-variant-numeric: tabular-nums;
   text-align: right;
-  color: var(--md-muted, #6b7280);
+  color: var(--md-muted);
 }
 
 .balance-due-pill {
@@ -534,5 +531,5 @@
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
-.balance-due-pill-due { background: var(--md-danger-soft, #fef2f2); color: var(--md-danger, #dc2626); }
-.balance-due-pill-paid { background: var(--md-success-soft, #f0fdf4); color: var(--md-success, #16a34a); }
+.balance-due-pill-due { background: var(--md-danger-soft); color: var(--md-danger); }
+.balance-due-pill-paid { background: var(--md-success-soft); color: var(--md-success); }
