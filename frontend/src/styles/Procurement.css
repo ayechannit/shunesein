@@ -568,3 +568,18 @@
   color: var(--md-danger);
   white-space: normal;
 }
+
+/* Route Trips: the trip summary uses the full width (the default
+   .procurement-summary is a narrow right-aligned totals box, which left a
+   blank area beside it in the trip details). */
+.procurement-summary.route-summary {
+  max-width: none;
+  margin-left: 0;
+}
+
+/* Card heading followed directly by form fields (e.g. "2. Cash check",
+   "Record repayment") - give it breathing room above the first labels. */
+.route-card-title {
+  display: block;
+  margin-bottom: 12px;
+}

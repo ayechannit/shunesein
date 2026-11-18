@@ -1362,15 +1362,22 @@ const MasterDataManagement = ({ token, onLogout }) => {
           <AppButton variant="primary" iconLeft={<PlusIcon className="button-icon" />} onClick={openCreate}>
             {activeModule.createButtonLabel}
           </AppButton>
-          <AppButton variant="secondary" iconLeft={<UploadIcon className="button-icon" />} onClick={() => fileInputRef.current?.click()}>
-            Import
-          </AppButton>
-          <input ref={fileInputRef} type="file" accept=".csv" hidden onChange={handleImport} />
+          {!activeModule.noImportExport ? (
+            <>
+              <AppButton variant="secondary" iconLeft={<UploadIcon className="button-icon" />} onClick={() => fileInputRef.current?.click()}>
+                Import
+              </AppButton>
+              <input ref={fileInputRef} type="file" accept=".csv" hidden onChange={handleImport} />
+            </>
+          ) : null}
         </>
       ) : null}
-      <AppButton variant="secondary" iconLeft={<DownloadIcon className="button-icon" />} onClick={handleExport}>
-        Export
-      </AppButton>
+      {/* noImportExport: modules whose API has no /import or /export route (e.g. Vehicles). */}
+      {!activeModule.noImportExport ? (
+        <AppButton variant="secondary" iconLeft={<DownloadIcon className="button-icon" />} onClick={handleExport}>
+          Export
+        </AppButton>
+      ) : null}
     </>
   );
 

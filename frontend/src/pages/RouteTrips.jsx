@@ -701,7 +701,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
         >
           {detail.loading ? <div className="field-hint">Loading...</div> : (
             <div className="procurement-shell">
-              <div className="procurement-summary">
+              <div className="procurement-summary route-summary">
                 <div className="procurement-summary-row"><span>Status</span><StatusBadge value={detail.status} /></div>
                 <div className="procurement-summary-row"><span>Total sales on this trip</span><strong>{fmt(detail.totals.sales_total)}</strong></div>
                 <div className="procurement-summary-row"><span>Cash collected into the vehicle&apos;s bag</span><strong>{fmt(detail.totals.paid_to_bag)}</strong></div>
@@ -725,7 +725,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
               </div>
 
               <div className="procurement-card">
-                <strong>Invoices ({detail.invoices.length})</strong>
+                <strong className="route-card-title">Invoices ({detail.invoices.length})</strong>
                 <table className="procurement-items-table">
                   <thead><tr><th>Invoice</th><th>Customer</th><th>Type</th><th>Amount</th><th>Paid to bag</th><th>Paid elsewhere</th><th>Balance</th></tr></thead>
                   <tbody>
@@ -747,7 +747,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
 
               {detail.status === 'on_route' ? (
                 <div className="procurement-card">
-                  <strong>Stock on the vehicle now</strong>
+                  <strong className="route-card-title">Stock on the vehicle now</strong>
                   <table className="procurement-items-table">
                     <thead><tr><th>Product</th><th>Loaded this trip</th><th>Sold this trip</th><th>On vehicle (system)</th></tr></thead>
                     <tbody>
@@ -765,7 +765,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
                 </div>
               ) : (
                 <div className="procurement-card">
-                  <strong>Stock count at settlement</strong>
+                  <strong className="route-card-title">Stock count at settlement</strong>
                   <table className="procurement-items-table">
                     <thead><tr><th>Product</th><th>System</th><th>Counted</th><th>Difference</th><th>Returned</th><th>Kept on vehicle</th></tr></thead>
                     <tbody>
@@ -886,7 +886,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
             </div>
 
             <div className="procurement-card">
-              <strong>2. Cash check</strong>
+              <strong className="route-card-title">2. Cash check</strong>
               <div className="procurement-grid">
                 <div className="form-field">
                   <label>Cash expected (in the vehicle&apos;s bag)</label>
@@ -905,7 +905,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
                   <input type="text" value={settleForm.remark} onChange={(e) => setSettleForm((prev) => ({ ...prev, remark: e.target.value }))} placeholder="Optional, e.g. reason for a difference" />
                 </div>
               </div>
-              <div className="procurement-summary">
+              <div className="procurement-summary route-summary">
                 <div className="procurement-summary-row procurement-summary-net">
                   <span>Cash difference</span>
                   <strong style={{ color: settleTotals.difference < 0 ? 'var(--md-danger)' : undefined }}>
@@ -940,7 +940,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
             {modalError ? <div className="status-banner status-banner-error" role="alert">{modalError}</div> : null}
             {repayForm ? (
               <div className="procurement-card">
-                <strong>Record repayment</strong>
+                <strong className="route-card-title">Record repayment</strong>
                 <div className="procurement-grid">
                   <div className="form-field">
                     <label>Salesperson *</label>
@@ -986,7 +986,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
             </table>
             {balances.entries.length > 0 ? (
               <div className="procurement-card">
-                <strong>History</strong>
+                <strong className="route-card-title">History</strong>
                 <table className="procurement-items-table">
                   <thead><tr><th>Date</th><th>Salesperson</th><th>Details</th><th>Amount</th></tr></thead>
                   <tbody>

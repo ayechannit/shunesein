@@ -862,6 +862,9 @@ export const MASTER_DATA_MODULES = {
     title: 'Vehicles',
     description: 'Vans and motorcycles used for route sales. Each one gets its own stock location and cash bag automatically.',
     apiBase: `${API_ROOT}/route/vehicles`,
+    // Vehicles create their own warehouse + cash account on save, so a CSV
+    // import/export through the generic master-data routes doesn't apply.
+    noImportExport: true,
     searchFields: ['name', 'plate_number'],
     defaultSort: { sortBy: 'name', order: 'ASC' },
     createButtonLabel: 'New Vehicle',
