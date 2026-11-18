@@ -583,3 +583,8 @@
   display: block;
   margin-bottom: 12px;
 }
+
+/* Settle popup: gap between the Remark field and the Cash difference box. */
+.procurement-summary.route-cash-diff {
+  margin-top: 12px;
+}

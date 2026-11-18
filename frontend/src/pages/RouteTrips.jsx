@@ -905,7 +905,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
                   <input type="text" value={settleForm.remark} onChange={(e) => setSettleForm((prev) => ({ ...prev, remark: e.target.value }))} placeholder="Optional, e.g. reason for a difference" />
                 </div>
               </div>
-              <div className="procurement-summary route-summary">
+              <div className="procurement-summary route-summary route-cash-diff">
                 <div className="procurement-summary-row procurement-summary-net">
                   <span>Cash difference</span>
                   <strong style={{ color: settleTotals.difference < 0 ? 'var(--md-danger)' : undefined }}>
