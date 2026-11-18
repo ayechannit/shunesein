@@ -33,6 +33,7 @@ import {
   fetchSalesInvoiceById,
   fetchProducts,
   fetchCustomers,
+  createCustomer,
   fetchWarehouses,
   fetchSuggestedPrice,
   fetchAccessiblePriceLevels,
@@ -666,6 +667,22 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     const nextItems = [...formValues.items];
     nextItems[index] = { ...nextItems[index], [key]: value };
     setFormValues((previous) => ({ ...previous, items: nextItems }));
+    // Drop this row's stale validation messages once the user touches it.
+    setFormErrors((previous) => {
+      const rowKeys = [`item-product-${index}`, `item-quantity-${index}`, `item-price-${index}`];
+      if (!rowKeys.some((rowKey) => previous[rowKey])) return previous;
+      const next = { ...previous };
+      rowKeys.forEach((rowKey) => delete next[rowKey]);
+      return next;
+    });
+  };
+
+  // Validation/save errors render at the top of the (scrollable) modal body.
+  // Save lives in the footer, so after a failed save the user is usually
+  // scrolled down to the items - bring the error banner into view.
+  const formTopRef = useRef(null);
+  const scrollFormErrorsIntoView = () => {
+    requestAnimationFrame(() => formTopRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' }));
   };
 
   // Price Level pricing (see PricingController/product_price_by_level) is
@@ -704,6 +721,8 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
 
   const removeItem = (index) => {
     setFormValues((previous) => ({ ...previous, items: previous.items.filter((_, itemIndex) => itemIndex !== index) }));
+    // Row errors are keyed by index, which shifts after a removal.
+    setFormErrors((previous) => Object.fromEntries(Object.entries(previous).filter(([key]) => !key.startsWith('item-'))));
   };
 
   const validateForm = () => {
@@ -731,6 +750,22 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         if (!item.unit_price || Number(item.unit_price) <= 0) nextErrors[`item-price-${index}`] = 'Price must be greater than 0.';
       });
     }
+    // Unit Price is read-only (it comes from the product / price level), so a
+    // zero price can't be fixed on this form - say where to fix it instead.
+    Object.keys(nextErrors).forEach((key) => {
+      if (key.startsWith('item-price-')) {
+        const index = Number(key.slice('item-price-'.length));
+        if (formValues.items[index]?.product_id) {
+          nextErrors[key] = 'No selling price. Set one in Products or Price Levels.';
+        }
+      }
+    });
+    const rowErrorCount = Object.keys(nextErrors).filter((key) => key.startsWith('item-')).length;
+    if (Object.keys(nextErrors).length > 0) {
+      nextErrors.submit = rowErrorCount > 0
+        ? 'Some items need attention - see the messages in the Items table below.'
+        : 'Please fill in the required fields.';
+    }
     return nextErrors;
   };
 
@@ -738,6 +773,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     const nextErrors = validateForm();
     if (Object.keys(nextErrors).length > 0) {
       setFormErrors(nextErrors);
+      scrollFormErrorsIntoView();
       return;
     }
 
@@ -790,6 +826,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         return;
       }
       setFormErrors({ submit: error.message || 'Unable to save record.' });
+      scrollFormErrorsIntoView();
     } finally {
       setSaving(false);
     }
@@ -1179,11 +1216,113 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     [products]
   );
 
+  // Option lists for the searchable dropdowns in the order/invoice form.
+  // Values are strings so they compare cleanly with formValues (ids arrive
+  // as strings from edit/convert flows). The "Unassigned"/"Default" entries
+  // let the user clear an optional field from inside the dropdown.
+  const customerOptions = useMemo(
+    () => customers.map((customer) => ({
+      value: String(customer.id),
+      label: customer.phone ? `${customer.name} (${customer.phone})` : customer.name,
+    })),
+    [customers]
+  );
+  const salespersonOptions = useMemo(
+    () => [{ value: '', label: 'Unassigned' }, ...salespeople.map((user) => ({ value: String(user.id), label: user.full_name || user.username }))],
+    [salespeople]
+  );
+  const warehouseOptions = useMemo(
+    () => warehouses.map((warehouse) => ({ value: String(warehouse.id), label: warehouse.name })),
+    [warehouses]
+  );
+  const priceLevelOptions = useMemo(
+    () => [{ value: '', label: 'Default' }, ...priceLevels.map((level) => ({ value: String(level.id), label: level.name }))],
+    [priceLevels]
+  );
+
+  // Quick "New customer" from inside the order/invoice form, so staff don't
+  // have to leave a half-filled invoice to add a walk-in customer.
+  const canCreateCustomers = hasPermission('manage_customers');
+  const emptyQuickCustomer = { name: '', phone: '', customer_type: '', address: '' };
+  const [quickCustomerOpen, setQuickCustomerOpen] = useState(false);
+  const [quickCustomer, setQuickCustomer] = useState(emptyQuickCustomer);
+  const [quickCustomerErrors, setQuickCustomerErrors] = useState({});
+  const [quickCustomerSaving, setQuickCustomerSaving] = useState(false);
+
+  const openQuickCustomer = () => {
+    setQuickCustomer(emptyQuickCustomer);
+    setQuickCustomerErrors({});
+    setQuickCustomerOpen(true);
+  };
+
+  const saveQuickCustomer = async () => {
+    const name = quickCustomer.name.trim();
+    if (!name) {
+      setQuickCustomerErrors({ name: 'Name is required.' });
+      return;
+    }
+    const payload = { name };
+    ['phone', 'customer_type', 'address'].forEach((key) => {
+      const value = quickCustomer[key].trim();
+      if (value) payload[key] = value;
+    });
+    setQuickCustomerSaving(true);
+    try {
+      const created = await createCustomer(token, payload);
+      setCustomers((previous) => [...previous, created].sort((a, b) => String(a.name).localeCompare(String(b.name))));
+      setFormValues((previous) => ({ ...previous, customer_id: String(created.id) }));
+      setFormErrors((previous) => ({ ...previous, customer_id: undefined }));
+      setQuickCustomerOpen(false);
+    } catch (error) {
+      if (error.status === 401) {
+        onLogout?.();
+        return;
+      }
+      setQuickCustomerErrors({ submit: error.message || 'Could not create the customer.' });
+    } finally {
+      setQuickCustomerSaving(false);
+    }
+  };
+
   const renderForm = () => {
     const isOrder = formType === 'orders';
     const summaryTotal = (formValues.items || []).reduce((sum, item) => sum + (Number(item.quantity || 0) * Number(item.unit_price || 0) * (1 - Number(item.discount_percent || 0) / 100)), 0);
     const discount = Number(formValues.discount_amount || 0);
     const tax = Number(formValues.tax_amount || 0);
+
+    const setFormField = (key, value) => setFormValues((previous) => ({ ...previous, [key]: value }));
+
+    const customerField = (
+      <div className="form-field">
+        <label>Customer *</label>
+        <div className="field-with-action">
+          <SearchableSelect
+            value={formValues.customer_id == null ? '' : String(formValues.customer_id)}
+            onChange={(value) => setFormField('customer_id', value)}
+            options={customerOptions}
+            placeholder="Select customer"
+            searchPlaceholder="Search name or phone..."
+          />
+          {canCreateCustomers ? (
+            <button type="button" className="master-button master-button-secondary field-action-button" onClick={openQuickCustomer} title="Create a new customer">
+              <PlusIcon className="button-icon" />
+              New
+            </button>
+          ) : null}
+        </div>
+        <span className="field-error">{formErrors.customer_id || ' '}</span>
+      </div>
+    );
+
+    const salespersonField = (
+      <FormField
+        field={{ key: 'salesperson_id', label: 'Salesperson', type: 'searchable-select', placeholder: 'Unassigned', searchPlaceholder: 'Search salespeople...' }}
+        value={formValues.salesperson_id == null ? '' : String(formValues.salesperson_id)}
+        error={formErrors.salesperson_id}
+        onChange={setFormField}
+        options={salespersonOptions}
+      />
+    );
 
     const closeFormModal = () => {
       setFormOpen(false);
@@ -1195,6 +1334,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     };
 
     return (
+      <>
       <MasterModal
         size="full"
         title={formMode === 'edit' ? `Edit ${isOrder ? 'Sale Order' : 'Sales Invoice'}` : (isOrder ? 'New Sale Order' : 'New Sales Invoice')}
@@ -1211,23 +1351,23 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           </>
         )}
       >
-        <div className="procurement-shell">
-          {formErrors.submit ? <div className="status-banner status-banner-error">{formErrors.submit}</div> : null}
+        <div className="procurement-shell" ref={formTopRef}>
+          {formErrors.submit ? <div className="status-banner status-banner-error" role="alert">{formErrors.submit}</div> : null}
           <div className="procurement-grid">
             {isOrder ? (
               <>
                 <FormField field={{ key: 'so_number', label: 'SO Number', type: 'text', readOnly: true }} value={formValues.so_number || ''} error={formErrors.so_number} onChange={() => {}} />
-                <FormField field={{ key: 'customer_id', label: 'Customer', type: 'select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((customer) => ({ value: customer.id, label: customer.name }))} />
-                <FormField field={{ key: 'salesperson_id', label: 'Salesperson', type: 'select', placeholder: 'Unassigned' }} value={formValues.salesperson_id} error={formErrors.salesperson_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={salespeople.map((user) => ({ value: user.id, label: user.full_name || user.username }))} />
+                {customerField}
+                {salespersonField}
                 <FormField field={{ key: 'order_date', label: 'Order Date', type: 'date' }} value={formValues.order_date} error={formErrors.order_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               </>
             ) : (
               <>
                 <FormField field={{ key: 'invoice_number', label: 'Invoice Number', type: 'text', readOnly: true }} value={formValues.invoice_number || ''} error={formErrors.invoice_number} onChange={() => {}} />
-                <FormField field={{ key: 'customer_id', label: 'Customer', type: 'select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((customer) => ({ value: customer.id, label: customer.name }))} />
-                <FormField field={{ key: 'salesperson_id', label: 'Salesperson', type: 'select', placeholder: 'Unassigned' }} value={formValues.salesperson_id} error={formErrors.salesperson_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={salespeople.map((user) => ({ value: user.id, label: user.full_name || user.username }))} />
-                <FormField field={{ key: 'warehouse_id', label: 'Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((warehouse) => ({ value: warehouse.id, label: warehouse.name }))} />
+                {customerField}
+                {salespersonField}
+                <FormField field={{ key: 'warehouse_id', label: 'Warehouse', type: 'searchable-select', required: true, placeholder: 'Select warehouse', searchPlaceholder: 'Search warehouses...' }} value={formValues.warehouse_id == null ? '' : String(formValues.warehouse_id)} error={formErrors.warehouse_id} onChange={setFormField} options={warehouseOptions} />
                 <FormField field={{ key: 'invoice_date', label: 'Invoice Date', type: 'date' }} value={formValues.invoice_date} error={formErrors.invoice_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               </>
@@ -1267,18 +1407,24 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                           searchPlaceholder="Search products..."
                         />
                         {product ? <div className="field-hint">{product.name}</div> : null}
+                        {formErrors[`item-product-${index}`] ? <div className="item-error">{formErrors[`item-product-${index}`]}</div> : null}
                       </td>
                       <td data-label="Price Level" style={{ minWidth: '160px' }}>
-                        <select style={{ width: '100%' }} value={item.price_level_id || ''} onChange={(event) => handleItemPriceLevelChange(index, event.target.value)}>
-                          <option value="">Default</option>
-                          {priceLevels.map((level) => <option key={level.id} value={level.id}>{level.name}</option>)}
-                        </select>
+                        <SearchableSelect
+                          value={item.price_level_id ? String(item.price_level_id) : ''}
+                          onChange={(newValue) => handleItemPriceLevelChange(index, newValue)}
+                          options={priceLevelOptions}
+                          placeholder="Default"
+                          searchPlaceholder="Search price levels..."
+                        />
                       </td>
                       <td data-label="Quantity">
-                        <input type="number" min="1" value={item.quantity || ''} onChange={(event) => updateItem(index, 'quantity', event.target.value)} />
+                        <input type="number" min="1" value={item.quantity || ''} onChange={(event) => updateItem(index, 'quantity', event.target.value)} aria-invalid={Boolean(formErrors[`item-quantity-${index}`])} />
+                        {formErrors[`item-quantity-${index}`] ? <div className="item-error">{formErrors[`item-quantity-${index}`]}</div> : null}
                       </td>
                       <td data-label="Unit Price">
-                        <input type="number" min="1" step="0.01" value={item.unit_price || ''} disabled title="Set by the selected price level (or the product's default price)" />
+                        <input type="number" min="1" step="0.01" value={item.unit_price || ''} disabled title="Set by the selected price level (or the product's default price)" aria-invalid={Boolean(formErrors[`item-price-${index}`])} />
+                        {formErrors[`item-price-${index}`] ? <div className="item-error">{formErrors[`item-price-${index}`]}</div> : null}
                       </td>
                       <td data-label="Discount %">
                         <input type="number" min="0" max="100" step="0.01" value={item.discount_percent || '0'} onChange={(event) => updateItem(index, 'discount_percent', event.target.value)} />
@@ -1339,6 +1485,49 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           </div>
         </div>
       </MasterModal>
+      {quickCustomerOpen ? (
+        <MasterModal
+          title="New Customer"
+          description="Add a customer and select it on this form. Other details can be filled in later under Customers."
+          onClose={() => !quickCustomerSaving && setQuickCustomerOpen(false)}
+          footer={(
+            <>
+              <button type="button" className="master-button master-button-secondary" onClick={() => setQuickCustomerOpen(false)} disabled={quickCustomerSaving}>
+                Cancel
+              </button>
+              <button type="button" className="master-button master-button-primary" onClick={saveQuickCustomer} disabled={quickCustomerSaving}>
+                {quickCustomerSaving ? 'Saving...' : 'Save Customer'}
+              </button>
+            </>
+          )}
+        >
+          <form
+            className="form-grid"
+            onSubmit={(event) => {
+              event.preventDefault();
+              saveQuickCustomer();
+            }}
+          >
+            {quickCustomerErrors.submit ? <div className="status-banner status-banner-error form-field-full">{quickCustomerErrors.submit}</div> : null}
+            {[
+              { key: 'name', label: 'Name', type: 'text', required: true, placeholder: 'Customer name' },
+              { key: 'phone', label: 'Phone', type: 'text', placeholder: 'Optional phone number' },
+              { key: 'customer_type', label: 'Customer Type', type: 'text', placeholder: 'Retail, wholesale...' },
+              { key: 'address', label: 'Address', type: 'textarea', rows: 2, span: 2, placeholder: 'Optional address' },
+            ].map((field) => (
+              <FormField
+                key={field.key}
+                field={{ ...field, key: `quick_customer_${field.key}` }}
+                value={quickCustomer[field.key]}
+                error={quickCustomerErrors[field.key]}
+                onChange={(_, value) => setQuickCustomer((previous) => ({ ...previous, [field.key]: value }))}
+              />
+            ))}
+            <button type="submit" hidden aria-hidden="true" tabIndex={-1} />
+          </form>
+        </MasterModal>
+      ) : null}
+      </>
     );
   };
 

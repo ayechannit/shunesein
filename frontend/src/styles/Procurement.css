@@ -542,3 +542,29 @@
 }
 .balance-due-pill-due { background: var(--md-danger-soft); color: var(--md-danger); }
 .balance-due-pill-paid { background: var(--md-success-soft); color: var(--md-success); }
+/* Searchable dropdown with an inline action button beside it (e.g. Customer
+   + "New" on the Sale Order / Sales Invoice form). */
+.field-with-action {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+}
+
+.field-with-action .searchable-select-trigger {
+  flex: 1;
+  min-width: 0;
+}
+
+.field-with-action .field-action-button {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+/* Per-row validation message under an item cell (Sale Order / Sales Invoice). */
+.item-error {
+  margin-top: 4px;
+  font-size: 12px;
+  line-height: 1.35;
+  color: var(--md-danger);
+  white-space: normal;
+}

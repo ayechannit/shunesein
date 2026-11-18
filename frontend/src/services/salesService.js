@@ -134,6 +134,15 @@ export const fetchCustomers = async (token) => {
   return response.data || [];
 };
 
+// Quick-add from the Sale Order / Sales Invoice form. Same endpoint as the
+// Customers master page; requires the manage_customers permission.
+export const createCustomer = async (token, payload) =>
+  buildRequest(`${API_ROOT}/master/customers`, token, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(payload),
+  });
+
 // Price suggestion for a line - if price_level_id is passed and the product
 // has a price set for it, that price wins; otherwise the product's flat
 // selling price is returned. See PricingController.
