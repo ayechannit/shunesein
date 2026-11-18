@@ -887,9 +887,9 @@ class PurchaseController {
 
           await client.query(`
             INSERT INTO stock_levels (warehouse_id, product_id, quantity)
-            VALUES ($1, $2, $3)
+            VALUES ($1, $2, GREATEST($3::numeric, 0))
             ON CONFLICT (warehouse_id, product_id)
-            DO UPDATE SET quantity = stock_levels.quantity + $3
+            DO UPDATE SET quantity = stock_levels.quantity + $3::numeric
           `, [item.warehouse_id, item.product_id, item.quantity]);
 
           await recordStockTransaction(client, item.product_id, item.warehouse_id, Number(item.quantity), 'goods_receipt', receipt.id);
@@ -1279,7 +1279,7 @@ class PurchaseController {
         for (const item of itemsResult.rows) {
           total_amount += Number(item.subtotal);
           await client.query(
-            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0)) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric',
             [item.warehouse_id, item.product_id, item.quantity]
           );
           await recordStockTransaction(client, item.product_id, item.warehouse_id, Number(item.quantity), 'goods_return_reversal', returnRecord.id);
@@ -1473,7 +1473,7 @@ class PurchaseController {
         // target different warehouses than they did originally.
         for (const item of oldItemsResult.rows) {
           await client.query(
-            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0)) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric',
             [item.warehouse_id, item.product_id, item.quantity]
           );
           await recordStockTransaction(client, item.product_id, item.warehouse_id, Number(item.quantity), 'purchase_return_edit_reversal', id);
@@ -1573,7 +1573,7 @@ class PurchaseController {
 
         for (const item of itemsResult.rows) {
           await client.query(
-            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0)) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric',
             [item.warehouse_id, item.product_id, item.quantity]
           );
           await recordStockTransaction(client, item.product_id, item.warehouse_id, Number(item.quantity), 'purchase_return_reversal', returnRecord.id);

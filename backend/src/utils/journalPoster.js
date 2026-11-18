@@ -8,6 +8,7 @@ const { todayUtcIsoDate } = require('./dateUtils');
 const ACCOUNT_CODES = {
   CASH_AND_BANK: '1000',
   ACCOUNTS_RECEIVABLE: '1100',
+  STAFF_RECEIVABLE: '1150', // route-sales cash shortages a salesperson owes (migration 034)
   INVENTORY: '1200',
   SUPPLIER_DEPOSITS: '1300',
   ACCOUNTS_PAYABLE: '2000',

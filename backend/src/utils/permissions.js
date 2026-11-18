@@ -99,6 +99,14 @@ module.exports = {
   MANAGE_SALE_ORDERS_DELETE: 'manage_sale_orders_delete',
   MANAGE_SALES_INVOICES_EDIT: 'manage_sales_invoices_edit',
   MANAGE_SALES_INVOICES_DELETE: 'manage_sales_invoices_delete',
+  // Overrides for invoices that already have payments (migration 033) -
+  // checked inside SalesController on top of the _EDIT/_DELETE route guards.
+  MANAGE_SALES_INVOICES_EDIT_PAID: 'manage_sales_invoices_edit_paid',
+  MANAGE_SALES_INVOICES_DELETE_PAID: 'manage_sales_invoices_delete_paid',
+  // Route (van / motorcycle) sales - migration 034.
+  MANAGE_VEHICLES: 'manage_vehicles',
+  MANAGE_ROUTE_TRIPS: 'manage_route_trips',
+  SETTLE_ROUTE_TRIPS: 'settle_route_trips',
   MANAGE_SALES_RETURNS_EDIT: 'manage_sales_returns_edit',
   MANAGE_SALES_RETURNS_DELETE: 'manage_sales_returns_delete',
   MANAGE_PURCHASE_ORDERS_EDIT: 'manage_purchase_orders_edit',

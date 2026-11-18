@@ -54,6 +54,7 @@ const reportRoutes = require("./routes/reportRoutes");
 const miscRoutes = require("./routes/miscRoutes");
 const stockLedgerRoutes = require("./routes/stockLedgerRoutes");
 const pricingRoutes = require("./routes/pricingRoutes");
+const routeSalesRoutes = require("./routes/routeSalesRoutes");
 const swaggerUi = require("swagger-ui-express");
 const swaggerDocument = require("../swagger.json");
 
@@ -71,6 +72,7 @@ app.use("/api/reports", reportRoutes);
 app.use("/api/misc", miscRoutes);
 app.use("/api/stock-ledger", stockLedgerRoutes);
 app.use("/api/pricing", pricingRoutes);
+app.use("/api/route", routeSalesRoutes);
 app.use("/api-docs", swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Basic Route

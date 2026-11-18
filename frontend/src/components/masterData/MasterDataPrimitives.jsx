@@ -445,7 +445,8 @@ export const StatusBadge = ({ value, type = 'default' }) => {
 
   if (typeof value === 'string') {
     const normalized = value.toLowerCase();
-    if (normalized === 'active' || normalized === 'paid' || normalized === 'completed' || normalized === 'received') badgeType = 'success';
+    if (normalized === 'active' || normalized === 'paid' || normalized === 'completed' || normalized === 'received' || normalized === 'settled') badgeType = 'success';
+    if (normalized === 'on_route') badgeType = 'warning';
     if (normalized === 'inactive' || normalized === 'unpaid' || normalized === 'cancelled' || normalized === 'failed') badgeType = 'danger';
     if (normalized === 'pending' || normalized === 'partial' || normalized === 'partially_received') badgeType = 'warning';
     if (normalized === 'approved') badgeType = 'info';

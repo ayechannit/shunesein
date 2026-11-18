@@ -49,6 +49,8 @@ export const MODULE_PERMISSIONS = {
   'sales-returns': { write: 'manage_sales_returns', edit: 'manage_sales_returns_edit', delete: 'manage_sales_returns_delete' },
 
   delivery: { write: 'manage_delivery', edit: 'manage_delivery_edit', delete: 'manage_delivery_delete' },
+  vehicles: { write: 'manage_vehicles' },
+  'route-trips': { write: 'manage_route_trips' },
   'production-batches': { write: 'manage_production', edit: 'manage_production_edit', delete: 'manage_production_delete' },
   'stock-transfers': { write: 'manage_stock', edit: 'manage_stock_edit', delete: 'manage_stock_delete' },
   'stock-adjustments': { write: 'manage_stock', edit: 'manage_stock_edit', delete: 'manage_stock_delete' },

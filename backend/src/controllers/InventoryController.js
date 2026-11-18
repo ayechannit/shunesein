@@ -238,7 +238,7 @@ class InventoryController {
           const rawMaterials = await client.query('SELECT * FROM production_raw_materials WHERE batch_id = $1', [id]);
           for (const item of rawMaterials.rows) {
             await client.query(
-              'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+              'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0)) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric',
               [item.warehouse_id, item.product_id, item.quantity]
             );
             await recordStockTransaction(client, item.product_id, item.warehouse_id, item.quantity, 'production_reversal', id);
@@ -256,7 +256,7 @@ class InventoryController {
               [id, item.product_id, item.quantity, item.warehouse_id, item.unit_cost || null, item.lot_number || null, item.expiry_date || null]
             );
             await client.query(
-              'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+              'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0)) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric',
               [item.warehouse_id, item.product_id, item.quantity]
             );
             await recordStockTransaction(client, item.product_id, item.warehouse_id, item.quantity, 'production', id);
@@ -503,7 +503,7 @@ class InventoryController {
         } else if (status === 'completed') {
           for (const item of items.rows) {
             await client.query(
-              'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+              'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0)) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric',
               [oldTransfer.to_warehouse_id, item.product_id, item.quantity]
             );
             await recordStockTransaction(client, item.product_id, oldTransfer.to_warehouse_id, item.quantity, 'transfer_in', id);
@@ -610,7 +610,7 @@ class InventoryController {
 
           await client.query('INSERT INTO stock_adjustment_items (adjustment_id, product_id, quantity, type) VALUES ($1, $2, $3, $4)', [adjustmentRecord.id, item.product_id, quantity, item.type]);
           await client.query(
-            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0)) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric',
             [warehouse_id, item.product_id, quantity]
           );
           await recordStockTransaction(client, item.product_id, warehouse_id, quantity, 'adjustment', adjustmentRecord.id);
@@ -717,7 +717,7 @@ class InventoryController {
 
           await client.query('INSERT INTO stock_adjustment_items (adjustment_id, product_id, quantity, type) VALUES ($1, $2, $3, $4)', [id, item.product_id, quantity, item.type]);
           await client.query(
-            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3',
+            'INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0)) ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric',
             [warehouse_id, item.product_id, quantity]
           );
           await recordStockTransaction(client, item.product_id, warehouse_id, quantity, 'adjustment_edit', id);

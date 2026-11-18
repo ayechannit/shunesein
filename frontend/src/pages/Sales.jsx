@@ -60,6 +60,7 @@ import {
 } from '../services/salesService';
 import { fetchPrintPageSetups, toPageSettings } from '../services/printSetupService';
 import { fetchUsersForFilter } from '../services/auditService';
+import { fetchOpenTrips } from '../services/routeService';
 import { openPrintDocument } from '../utils/printDocument';
 import { formatDate, formatDateTime, todayLocal as today } from '../utils/datetime';
 
@@ -87,6 +88,7 @@ const emptyInvoiceForm = () => ({
   customer_id: '',
   salesperson_id: '',
   warehouse_id: '',
+  route_trip_id: '',
   invoice_date: today(),
   remark: '',
   discount_amount: '0',
@@ -474,6 +476,10 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   // "Convert to Invoice" on an approved order creates an invoice, a
   // separately-permissioned action from editing the order itself.
   const canCreateInvoices = hasPermission('manage_sales_invoices');
+  // Overrides for invoices that already have payments (migration 033). The
+  // backend enforces these too; here they only decide what the menu shows.
+  const canEditPaidInvoices = hasPermission('manage_sales_invoices_edit_paid');
+  const canDeletePaidInvoices = hasPermission('manage_sales_invoices_delete_paid');
   const [orders, setOrders] = useState([]);
   const [ordersTotal, setOrdersTotal] = useState(0);
   const [ordersPage, setOrdersPage] = useState(1);
@@ -495,6 +501,9 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const [warehouses, setWarehouses] = useState([]);
   const [salespeople, setSalespeople] = useState([]);
   const [priceLevels, setPriceLevels] = useState([]);
+  // Route trips (van / motorcycle) still on route - lets a rider's tablet
+  // invoice sell from the vehicle's stock. See RouteTrips.jsx.
+  const [openTrips, setOpenTrips] = useState([]);
   const [formOpen, setFormOpen] = useState(false);
   const [formMode, setFormMode] = useState('create');
   const [formType, setFormType] = useState(defaultTab);
@@ -515,7 +524,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const [paymentMethods, setPaymentMethods] = useState([]);
   const [accounts, setAccounts] = useState([]);
   const [payments, setPayments] = useState([]);
-  const [paymentForm, setPaymentForm] = useState({ payment_method_id: '', amount: '', payment_date: new Date().toISOString().slice(0, 10), reference_no: '', bank_name: '', note: '', account_id: '' });
+  const [paymentForm, setPaymentForm] = useState({ payment_method_id: '', amount: '', payment_date: today(), reference_no: '', bank_name: '', note: '', account_id: '' });
   const [paymentLoading, setPaymentLoading] = useState(false);
   const [paymentError, setPaymentError] = useState('');
   const [paymentSuccess, setPaymentSuccess] = useState('');
@@ -576,7 +585,28 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     } catch {
       // ignore lookup errors for now
     }
+    if (defaultTab === 'invoices') {
+      try {
+        setOpenTrips(await fetchOpenTrips(token));
+      } catch {
+        setOpenTrips([]);
+      }
+    }
   };
+
+  // The logged-in user's id, from the JWT payload (used to pre-select the
+  // rider's own open trip on a new invoice).
+  const currentUserId = useMemo(() => {
+    try {
+      return JSON.parse(atob(String(token).split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))).id;
+    } catch {
+      return null;
+    }
+  }, [token]);
+
+  const tripFormValues = (trip) => (trip
+    ? { route_trip_id: String(trip.id), warehouse_id: String(trip.warehouse_id), ...(trip.salesperson_id ? { salesperson_id: String(trip.salesperson_id) } : {}) }
+    : { route_trip_id: '' });
 
   const loadOrders = async () => {
     if (!token || defaultTab !== 'orders') return;
@@ -658,9 +688,13 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const handleCreateInvoice = () => {
     setFormType('invoices');
     setFormMode('create');
-    setFormValues({ ...emptyInvoiceForm(), invoice_number: `INV-${Date.now()}` });
+    // A rider with exactly one trip on route starts on that trip: the
+    // invoice sells from the vehicle's stock automatically.
+    const myTrips = openTrips.filter((trip) => currentUserId && Number(trip.salesperson_id) === Number(currentUserId));
+    setFormValues({ ...emptyInvoiceForm(), invoice_number: `INV-${Date.now()}`, ...(myTrips.length === 1 ? tripFormValues(myTrips[0]) : {}) });
     setFormErrors({});
     setFormOpen(true);
+    fetchOpenTrips(token).then(setOpenTrips).catch(() => {});
   };
 
   const updateItem = (index, key, value) => {
@@ -1235,6 +1269,13 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     () => warehouses.map((warehouse) => ({ value: String(warehouse.id), label: warehouse.name })),
     [warehouses]
   );
+  const tripOptions = useMemo(
+    () => [{ value: '', label: 'None (shop / office sale)' }, ...openTrips.map((trip) => ({
+      value: String(trip.id),
+      label: `${trip.vehicle_name} - ${trip.salesperson_name || 'no salesperson'} (${trip.trip_number})`,
+    }))],
+    [openTrips]
+  );
   const priceLevelOptions = useMemo(
     () => [{ value: '', label: 'Default' }, ...priceLevels.map((level) => ({ value: String(level.id), label: level.name }))],
     [priceLevels]
@@ -1365,6 +1406,22 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
             ) : (
               <>
                 <FormField field={{ key: 'invoice_number', label: 'Invoice Number', type: 'text', readOnly: true }} value={formValues.invoice_number || ''} error={formErrors.invoice_number} onChange={() => {}} />
+                {formMode !== 'edit' && openTrips.length > 0 ? (
+                  <div className="form-field">
+                    <label>Route Trip (van / motorcycle)</label>
+                    <SearchableSelect
+                      value={formValues.route_trip_id ? String(formValues.route_trip_id) : ''}
+                      onChange={(value) => {
+                        const trip = openTrips.find((t) => String(t.id) === String(value));
+                        setFormValues((previous) => ({ ...previous, ...(trip ? tripFormValues(trip) : { route_trip_id: '' }) }));
+                      }}
+                      options={tripOptions}
+                      placeholder="None (shop / office sale)"
+                      searchPlaceholder="Search trips..."
+                    />
+                    <span className="field-hint">{formValues.route_trip_id ? "Sells from the vehicle's stock. Take cash into the vehicle's cash bag." : 'Pick a trip when selling from a van or motorcycle.'}</span>
+                  </div>
+                ) : null}
                 {customerField}
                 {salespersonField}
                 <FormField field={{ key: 'warehouse_id', label: 'Warehouse', type: 'searchable-select', required: true, placeholder: 'Select warehouse', searchPlaceholder: 'Search warehouses...' }} value={formValues.warehouse_id == null ? '' : String(formValues.warehouse_id)} error={formErrors.warehouse_id} onChange={setFormField} options={warehouseOptions} />
@@ -1564,6 +1621,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [viewRecord, defaultTab]);
 
+  // A receipt on an invoice whose route trip is still out goes into that
+  // vehicle's cash bag by default (it's settled in the evening).
+  useEffect(() => {
+    if (!viewRecord?.route_trip_id) return;
+    const trip = openTrips.find((t) => Number(t.id) === Number(viewRecord.route_trip_id));
+    if (trip) setPaymentForm((previous) => (previous.account_id ? previous : { ...previous, account_id: String(trip.cash_account_id) }));
+  }, [viewRecord?.id, viewRecord?.route_trip_id, openTrips]);
+
   // View Modal
   const renderViewModal = () => {
     if (!viewRecord) return null;
@@ -1603,7 +1668,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         });
 
         setPaymentSuccess('Payment recorded successfully.');
-        setPaymentForm({ payment_method_id: '', amount: '', payment_date: new Date().toISOString().slice(0, 10), reference_no: '', bank_name: '', note: '', account_id: '' });
+        setPaymentForm({ payment_method_id: '', amount: '', payment_date: today(), reference_no: '', bank_name: '', note: '', account_id: '' });
         await loadInvoicePayments(viewRecord.id);
         const updated = await fetchSalesInvoiceById(token, viewRecord.id);
         setViewRecord(updated);
@@ -2074,7 +2139,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           <EyeIcon className="menu-icon" />
           <span>View</span>
         </button>
-        {canEdit && isUnpaid ? (
+        {canEdit && (isUnpaid || canEditPaidInvoices) ? (
           <button type="button" className="dropdown-menu-item" onClick={() => handleAction('edit', row)}>
             <PencilIcon className="menu-icon" />
             <span>Edit</span>
@@ -2088,7 +2153,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           <PrinterIcon className="menu-icon" />
           <span>Print with Page Setup...</span>
         </button>
-        {canDelete ? (
+        {canDelete && (isUnpaid || canDeletePaidInvoices) ? (
           <button type="button" className="dropdown-menu-item danger" onClick={() => handleAction('delete', row)}>
             <TrashIcon className="menu-icon" />
             <span>Delete</span>
@@ -2215,7 +2280,11 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
       {deleteTarget ? (
         <ConfirmDialog
           title={`Delete ${defaultTab === 'orders' ? 'Sale Order' : 'Sales Invoice'}?`}
-          description={`Are you sure you want to delete ${defaultTab === 'orders' ? deleteTarget.so_number : deleteTarget.invoice_number}? This action cannot be undone.`}
+          description={
+            defaultTab !== 'orders' && (deleteTarget.payment_status || 'unpaid') !== 'unpaid'
+              ? `${deleteTarget.invoice_number} has customer payments recorded. Deleting it will also delete those payments and take the money back out of the cash/bank account, and return the stock. This action cannot be undone.`
+              : `Are you sure you want to delete ${defaultTab === 'orders' ? deleteTarget.so_number : deleteTarget.invoice_number}? This action cannot be undone.`
+          }
           confirmLabel="Delete"
           onCancel={() => { setDeleteTarget(null); setDeleteError(''); }}
           onConfirm={handleDeleteConfirm}

@@ -37,4 +37,17 @@ const checkPermission = (permissionName) => {
   };
 };
 
-module.exports = { verifyToken, checkPermission };
+// For permission checks that depend on the record's state (e.g. "may edit
+// even though it's paid"), which a route-level checkPermission can't express.
+const roleHasPermission = async (roleId, permissionName) => {
+  if (!roleId) return false;
+  const result = await db.query(
+    `SELECT 1 FROM permissions p
+     JOIN role_permissions rp ON p.id = rp.permission_id
+     WHERE rp.role_id = $1 AND p.name = $2`,
+    [roleId, permissionName]
+  );
+  return result.rows.length > 0;
+};
+
+module.exports = { verifyToken, checkPermission, roleHasPermission };

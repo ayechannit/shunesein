@@ -32,6 +32,7 @@ import Sales from './Sales';
 import Inventory from './Inventory';
 import Finance from './Finance';
 import Delivery from './Delivery';
+import RouteTrips from './RouteTrips';
 import Reports from './Reports';
 import AuditLog from './AuditLog';
 import { formatDateTime, detectBrowserTimezone, listTimezones } from '../utils/datetime';
@@ -124,7 +125,7 @@ const getSortValue = (config) => `${config.defaultSort.sortBy}-${config.defaultS
 const createEmptyForm = (moduleConfig) =>
   moduleConfig.fields.reduce((accumulator, field) => {
     if (field.type === 'checkbox') {
-      accumulator[field.key] = false;
+      accumulator[field.key] = Boolean(field.defaultValue);
       return accumulator;
     }
 
@@ -342,6 +343,10 @@ function iconForModule(moduleKey) {
       return 'grid';
     case 'delivery':
       return 'truck';
+    case 'vehicles':
+      return 'truck';
+    case 'route-trips':
+      return 'refresh';
     case 'report-current-stock':
       return 'package';
     case 'report-low-stock':
@@ -1457,6 +1462,8 @@ const MasterDataManagement = ({ token, onLogout }) => {
           <Finance token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} hasPermission={hasPermission} />
         ) : activeModule.renderType === 'delivery' ? (
           <Delivery token={token} onLogout={onLogout} embedded hasPermission={hasPermission} />
+        ) : activeModule.renderType === 'route-trips' ? (
+          <RouteTrips token={token} onLogout={onLogout} embedded hasPermission={hasPermission} currentUser={currentUser} />
         ) : activeModule.renderType === 'reports' ? (
           <Reports token={token} onLogout={onLogout} embedded defaultTab={activeModule.defaultTab} />
         ) : activeModule.renderType === 'audit' ? (

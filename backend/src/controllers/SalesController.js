@@ -3,6 +3,8 @@ const logAction = require('../utils/auditLogger');
 const recordStockTransaction = require('../utils/stockLogger');
 const { postJournalEntry, reverseJournalEntries, ACCOUNT_CODES } = require('../utils/journalPoster');
 const HttpError = require('../utils/HttpError');
+const { roleHasPermission } = require('../middleware/auth');
+const { MANAGE_SALES_INVOICES_EDIT_PAID, MANAGE_SALES_INVOICES_DELETE_PAID } = require('../utils/permissions');
 
 class SalesController {
   // List Sale Orders
@@ -292,8 +294,13 @@ class SalesController {
   };
 
   // Update Sales Invoice
-  // Only allowed while unpaid - once a payment exists the invoice's totals must
-  // stay put, since a payment was recorded against a specific net_amount.
+  // Normally only allowed while unpaid - once a payment exists the invoice's
+  // totals should stay put, since a payment was recorded against a specific
+  // net_amount. Roles with manage_sales_invoices_edit_paid may edit anyway:
+  // the payments are kept and payment_status is recomputed against the new
+  // net_amount. If the new total is below what was received, the invoice
+  // reads 'paid' and the excess remains as customer credit (the customer's
+  // outstanding_balance is reconciled by the net delta below as usual).
   updateInvoice = async (req, res) => {
     try {
       const { id } = req.params;
@@ -304,8 +311,8 @@ class SalesController {
       if (existing.rows.length === 0) {
         return res.status(404).json({ error: 'Sales invoice not found' });
       }
-      if (existing.rows[0].payment_status !== 'unpaid') {
-        return res.status(400).json({ error: 'Only unpaid invoices can be edited' });
+      if (existing.rows[0].payment_status !== 'unpaid' && !(await roleHasPermission(req.user?.role_id, MANAGE_SALES_INVOICES_EDIT_PAID))) {
+        return res.status(400).json({ error: 'Only unpaid invoices can be edited. Ask an admin for the "edit paid sales invoices" permission.' });
       }
       if (existing.rows[0].warehouse_id !== warehouse_id) {
         return res.status(400).json({ error: 'Changing the warehouse on an existing invoice is not supported - delete and recreate it instead' });
@@ -409,6 +416,20 @@ class SalesController {
           ],
         });
 
+        // Keep payment_status in step with the (possibly changed) net_amount.
+        // A no-op for unpaid invoices; matters when an edit_paid user changes
+        // the total of a paid/partial invoice.
+        const paidResult = await client.query(
+          `SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE transaction_type = 'sale' AND transaction_id = $1`,
+          [id]
+        );
+        const totalPaid = Number(paidResult.rows[0].total_paid);
+        const newStatus = totalPaid <= 0.01 ? 'unpaid' : totalPaid >= newNetAmount - 0.01 ? 'paid' : 'partial';
+        if (newStatus !== updated.payment_status) {
+          await client.query('UPDATE sales_invoices SET payment_status = $1 WHERE id = $2', [newStatus, id]);
+          updated.payment_status = newStatus;
+        }
+
         await logAction(req.user.id, 'UPDATE', 'sales_invoices', id, existing.rows[0], updated, client);
         return updated;
       });
@@ -423,13 +444,18 @@ class SalesController {
   };
 
   // Delete Sales Invoice
-  // Blocked once payments exist (money already moved); otherwise fully reverses
-  // the invoice: adds the sold stock back (always safe, unlike a purchase
-  // reversal), reverses the customer's outstanding_balance, and reopens the
-  // linked sale order back to 'approved' so it can be invoiced again.
+  // Fully reverses the invoice: adds the sold stock back (always safe, unlike
+  // a purchase reversal), reverses the customer's outstanding_balance, and
+  // reopens the linked sale order back to 'approved' so it can be invoiced
+  // again. Normally blocked once payments exist (money already moved); roles
+  // with manage_sales_invoices_delete_paid may delete anyway, in which case
+  // every receipt on the invoice is deleted first and reversed exactly like
+  // PaymentController.delete does (account balance, customer balance,
+  // journal entry, audit log) - as if the sale never happened.
   deleteInvoice = async (req, res) => {
     try {
       const { id } = req.params;
+      const canDeletePaid = await roleHasPermission(req.user?.role_id, MANAGE_SALES_INVOICES_DELETE_PAID);
 
       const invoice = await db.withTransaction(async (client) => {
         const existingResult = await client.query('SELECT * FROM sales_invoices WHERE id = $1 FOR UPDATE', [id]);
@@ -438,12 +464,33 @@ class SalesController {
         }
         const invoiceRecord = existingResult.rows[0];
 
-        const paidResult = await client.query(
-          `SELECT COALESCE(SUM(amount), 0) as total_paid FROM payments WHERE transaction_type = 'sale' AND transaction_id = $1`,
+        const paymentsResult = await client.query(
+          `SELECT * FROM payments WHERE transaction_type = 'sale' AND transaction_id = $1 ORDER BY id FOR UPDATE`,
           [id]
         );
-        if (Number(paidResult.rows[0].total_paid) > 0) {
-          throw new HttpError(400, 'This invoice has recorded payments and cannot be deleted. Remove the payments first.');
+        if (paymentsResult.rows.length > 0) {
+          if (!canDeletePaid) {
+            throw new HttpError(400, 'This invoice has recorded payments and cannot be deleted. Remove the payments first, or ask an admin for the "delete paid sales invoices" permission.');
+          }
+          for (const payment of paymentsResult.rows) {
+            await client.query('DELETE FROM payments WHERE id = $1', [payment.id]);
+            // Receipt had added money to this account - take it back out.
+            if (payment.account_id) {
+              await client.query('UPDATE accounts SET balance = balance - $1 WHERE id = $2', [payment.amount, payment.account_id]);
+            }
+            // Receipt had reduced what the customer owes - put it back, so the
+            // invoice reversal below brings the balance to the right place.
+            if (invoiceRecord.customer_id) {
+              await client.query('UPDATE customers SET outstanding_balance = outstanding_balance + $1 WHERE id = $2', [payment.amount, invoiceRecord.customer_id]);
+            }
+            await reverseJournalEntries(client, {
+              referenceType: 'payment',
+              referenceId: payment.id,
+              description: `Deleted with Sales Invoice ${invoiceRecord.invoice_number}`,
+              createdBy: req.user.id,
+            });
+            await logAction(req.user.id, 'DELETE', 'payments', payment.id, payment, null, client);
+          }
         }
 
         const itemsResult = await client.query('SELECT product_id, quantity FROM sales_items WHERE invoice_id = $1', [id]);
@@ -476,6 +523,12 @@ class SalesController {
     } catch (error) {
       if (error instanceof HttpError) {
         return res.status(error.statusCode).json({ message: error.message });
+      }
+      // foreign_key_violation: still referenced by a delivery, sales return
+      // or POS record. The whole transaction (incl. any payment reversal)
+      // has rolled back, so nothing changed.
+      if (error.code === '23503') {
+        return res.status(400).json({ message: 'This invoice is linked to a delivery, sales return or POS sale. Remove those first, then delete the invoice.' });
       }
       res.status(500).json({ error: error.message });
     }
@@ -531,10 +584,21 @@ class SalesController {
     // string is not a valid integer, so it must become null, not pass through as-is.
     const so_id = req.body.so_id ? Number(req.body.so_id) : null;
     const salesperson_id = req.body.salesperson_id ? Number(req.body.salesperson_id) : null;
+    // Optional: the route trip (van / motorcycle) this sale was made on - see
+    // RouteController. Must be a trip that is still on route.
+    const route_trip_id = req.body.route_trip_id ? Number(req.body.route_trip_id) : null;
     const created_by = req.user.id;
 
     try {
       const invoice = await db.withTransaction(async (client) => {
+        if (route_trip_id) {
+          const tripResult = await client.query('SELECT status, trip_number FROM route_trips WHERE id = $1', [route_trip_id]);
+          if (tripResult.rows.length === 0) throw new HttpError(400, 'Route trip not found');
+          if (tripResult.rows[0].status !== 'on_route') {
+            throw new HttpError(400, `Route trip ${tripResult.rows[0].trip_number} is already settled - start a new trip.`);
+          }
+        }
+
         // Net of each line's own discount, same convention as sale_orders -
         // the invoice-level discount_amount field stays available for an
         // additional overall discount on top, it isn't replaced by this.
@@ -545,11 +609,11 @@ class SalesController {
         }
 
         const invoiceQuery = `
-          INSERT INTO sales_invoices (invoice_number, so_id, customer_id, warehouse_id, invoice_date, total_amount, discount_amount, tax_amount, remark, created_by, salesperson_id)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+          INSERT INTO sales_invoices (invoice_number, so_id, customer_id, warehouse_id, invoice_date, total_amount, discount_amount, tax_amount, remark, created_by, salesperson_id, route_trip_id)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
           RETURNING *
         `;
-        const iResult = await client.query(invoiceQuery, [invoice_number, so_id, customer_id, warehouse_id, invoice_date, total_amount, discount_amount, tax_amount, remark, created_by, salesperson_id]);
+        const iResult = await client.query(invoiceQuery, [invoice_number, so_id, customer_id, warehouse_id, invoice_date, total_amount, discount_amount, tax_amount, remark, created_by, salesperson_id, route_trip_id]);
         const invoiceRecord = iResult.rows[0];
 
         const itemQuery = `
@@ -723,8 +787,8 @@ class SalesController {
           await client.query(itemQuery, [returnRecord.id, item.product_id, item.quantity, item.unit_price]);
 
           await client.query(
-            `INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3)
-             ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3`,
+            `INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0))
+             ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric`,
             [warehouse_id, item.product_id, item.quantity]
           );
           await recordStockTransaction(client, item.product_id, warehouse_id, item.quantity, 'sales_return', returnRecord.id);
@@ -826,8 +890,8 @@ class SalesController {
         for (const item of items) {
           await client.query(itemQuery, [id, item.product_id, item.quantity, item.unit_price]);
           await client.query(
-            `INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, $3)
-             ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3`,
+            `INSERT INTO stock_levels (warehouse_id, product_id, quantity) VALUES ($1, $2, GREATEST($3::numeric, 0))
+             ON CONFLICT (warehouse_id, product_id) DO UPDATE SET quantity = stock_levels.quantity + $3::numeric`,
             [warehouse_id, item.product_id, item.quantity]
           );
           await recordStockTransaction(client, item.product_id, warehouse_id, Number(item.quantity), 'sales_return_edit', id);
