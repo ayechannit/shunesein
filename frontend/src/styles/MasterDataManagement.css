@@ -1522,7 +1522,28 @@ tbody tr:hover .action-cell { background: var(--md-surface-soft); }
 }
 
 /* ─── Picker List (e.g. Delivery's invoice checklist) ─── */
-.picker-list-search { margin-bottom: 8px; }
+/* Standalone styling (not just via .form-field input) so the picker search
+   looks the same wherever it's placed - e.g. the New Trip popup puts it in a
+   card, outside any .form-field. */
+input.picker-list-search {
+  display: block;
+  width: 100%;
+  height: 40px;
+  margin: 8px 0;
+  padding: 0 12px 0 36px;
+  border: 1px solid var(--md-border);
+  border-radius: var(--md-radius);
+  background: var(--md-surface) url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='16' height='16' viewBox='0 0 24 24' fill='none' stroke='%2394a3b8' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Ccircle cx='11' cy='11' r='7'/%3E%3Cpath d='m20 20-3.5-3.5'/%3E%3C/svg%3E") no-repeat 12px center;
+  color: var(--md-text);
+  font-size: 14px;
+  outline: none;
+  box-sizing: border-box;
+  transition: border-color 160ms ease, box-shadow 160ms ease;
+}
+input.picker-list-search:focus {
+  border-color: var(--md-primary-line);
+  box-shadow: 0 0 0 3px var(--md-focus-ring);
+}
 
 .picker-list {
   max-height: 220px;

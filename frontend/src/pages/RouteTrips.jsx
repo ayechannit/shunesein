@@ -47,6 +47,9 @@ const userLabel = (user) => (user?.full_name ? `${user.full_name} (${user.userna
 
 const emptyLine = () => ({ product_id: '', quantity: '' });
 
+// Civil date 'YYYY-MM-DD' from an API DATE value, without a JS Date round-trip.
+const tripDay = (value) => (value ? String(value).slice(0, 10) : today());
+
 const emptyTripForm = (vehicle) => ({
   trip_date: today(),
   vehicle_id: vehicle ? String(vehicle.id) : '',
@@ -296,7 +299,9 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
       const trip = await fetchTrip(token, row.id);
       setSettleForm({
         trip,
-        settlement_date: today(),
+        // Default to the trip day: a van that returns after hours is often
+        // settled next morning, but the books belong to the trip date.
+        settlement_date: tripDay(trip.trip_date),
         return_warehouse_id: trip.source_warehouse_id ? String(trip.source_warehouse_id) : '',
         deposit_account_id: '',
         cash_counted: String(trip.cash_expected || 0),
@@ -340,6 +345,8 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
       if (line.counted_qty === '' || Number(line.counted_qty) < 0) return setModalError(`Enter the counted quantity for ${line.product_name}.`);
       if (Number(line.return_qty || 0) > Number(line.counted_qty)) return setModalError(`Return for ${line.product_name} can't be more than counted.`);
     }
+    if (!settleForm.settlement_date) return setModalError('Choose the settlement date.');
+    if (settleForm.settlement_date < tripDay(trip.trip_date)) return setModalError('Settlement date cannot be before the trip date.');
     if (settleForm.cash_counted === '' || Number(settleForm.cash_counted) < 0) return setModalError('Enter the cash counted (0 if none).');
     if ((Number(settleForm.cash_counted) > 0 || settleTotals.expected > 0) && !settleForm.deposit_account_id) {
       return setModalError('Choose the account the cash is handed in to.');
@@ -427,10 +434,12 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
     { key: 'sales_total', label: 'Sales' },
     { key: 'cash', label: 'Cash' },
     { key: 'status', label: 'Status' },
+    { key: 'settlement_date', label: 'Settled On' },
   ];
 
   const renderCell = (row, column) => {
     if (column.key === 'trip_date') return formatDate(row.trip_date);
+    if (column.key === 'settlement_date') return row.settlement_date ? formatDate(row.settlement_date) : '-';
     if (column.key === 'status') return <StatusBadge value={row.status} />;
     if (column.key === 'sales_total') return fmt(row.sales_total);
     if (column.key === 'cash') {
@@ -709,7 +718,8 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
                         {Number(detail.cash_difference) === 0 ? 'None' : Number(detail.cash_difference) < 0 ? `Short ${fmt(-detail.cash_difference)} (owed by salesperson)` : `Over ${fmt(detail.cash_difference)}`}
                       </strong>
                     </div>
-                    <div className="field-hint">Settled {detail.settled_at ? new Date(detail.settled_at).toLocaleString() : ''} by {detail.settled_by_name || '-'}; cash to {detail.deposit_account_name || '-'}.</div>
+                    <div className="procurement-summary-row"><span>Settlement date</span><strong>{formatDate(detail.settlement_date)}</strong></div>
+                    <div className="field-hint">Entered {detail.settled_at ? new Date(detail.settled_at).toLocaleString() : ''} by {detail.settled_by_name || '-'}; cash to {detail.deposit_account_name || '-'}.</div>
                   </>
                 )}
               </div>
@@ -822,6 +832,23 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
             {modalError ? <div className="status-banner status-banner-error" role="alert">{modalError}</div> : null}
 
             <div className="procurement-card">
+              <div className="procurement-grid">
+                <div className="form-field">
+                  <label>Settlement date *</label>
+                  <input
+                    type="date"
+                    value={settleForm.settlement_date}
+                    min={tripDay(settleForm.trip.trip_date)}
+                    onChange={(e) => setSettleForm((prev) => ({ ...prev, settlement_date: e.target.value }))}
+                  />
+                  <span className="field-hint">
+                    The date the cash hand-in and any difference are recorded on. It starts as the trip date ({formatDate(settleForm.trip.trip_date)}); change it if needed. You can settle a day later and still keep the trip date.
+                  </span>
+                </div>
+              </div>
+            </div>
+
+            <div className="procurement-card">
               <div className="procurement-toolbar">
                 <strong>1. Stock check</strong>
                 <span className="field-hint">Counted = what is physically on the vehicle. Return = how much goes back to the warehouse; the rest stays on the vehicle for tomorrow.</span>
@@ -872,10 +899,6 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
                 <div className="form-field">
                   <label>Hand cash in to account *</label>
                   <SearchableSelect value={settleForm.deposit_account_id} onChange={(value) => setSettleForm((prev) => ({ ...prev, deposit_account_id: value }))} options={officeAccountOptions} placeholder="Select account" searchPlaceholder="Search accounts..." />
-                </div>
-                <div className="form-field">
-                  <label>Settlement date</label>
-                  <input type="date" value={settleForm.settlement_date} onChange={(e) => setSettleForm((prev) => ({ ...prev, settlement_date: e.target.value }))} />
                 </div>
                 <div className="form-field form-field-full">
                   <label>Remark</label>

@@ -562,6 +562,11 @@ class RouteController {
         if (tripResult.rows.length === 0) throw new HttpError(404, 'Trip not found');
         const trip = tripResult.rows[0];
         if (trip.status !== 'on_route') throw new HttpError(400, 'This trip is already settled.');
+        // Compared in SQL as DATEs so no JS Date / timezone conversion is involved.
+        const dateCheck = await client.query('SELECT $1::date < $2::date AS too_early', [settlementDate, trip.trip_date]);
+        if (dateCheck.rows[0].too_early) {
+          throw new HttpError(400, 'Settlement date cannot be before the trip date.');
+        }
         const vehicle = (await client.query('SELECT * FROM vehicles WHERE id = $1', [trip.vehicle_id])).rows[0];
         const returnWarehouseId = Number(req.body.return_warehouse_id || trip.source_warehouse_id) || null;
 
@@ -715,10 +720,10 @@ class RouteController {
         const updated = await client.query(
           `UPDATE route_trips SET status = 'settled', settled_at = NOW(), settled_by = $1, deposit_account_id = $2,
                   return_warehouse_id = $3, cash_expected = $4, cash_counted = $5, cash_difference = $6,
-                  stock_variance_value = $7, settlement_remark = $8
+                  stock_variance_value = $7, settlement_remark = $8, settlement_date = $10
            WHERE id = $9 RETURNING *`,
           [req.user.id, depositAccountId, anyReturn ? returnWarehouseId : null, cashExpected, cashCounted, difference,
-            round2(gainValue - lossValue), req.body.remark || null, trip.id]
+            round2(gainValue - lossValue), req.body.remark || null, trip.id, settlementDate]
         );
         await logAction(req.user.id, 'UPDATE', 'route_trips', trip.id, trip, updated.rows[0], client);
         return updated.rows[0];
