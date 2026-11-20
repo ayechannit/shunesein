@@ -275,6 +275,7 @@ class SalesController {
         ['customer_id', 'customer_id', 'id'],
         ['warehouse_id', 'warehouse_id', 'id'],
         ['route_trip_id', 'route_trip_id', 'id'],
+        ['salesperson_id', 'salesperson_id', 'id'],
       ]);
 
       const allowedSortColumns = ['id', 'invoice_number', 'customer_id', 'warehouse_id', 'invoice_date', 'total_amount', 'discount_amount', 'tax_amount', 'net_amount', 'payment_status', 'created_at'];
@@ -301,12 +302,49 @@ class SalesController {
       `;
       const countQuery = `SELECT COUNT(*) FROM sales_invoices si ${whereClause}`;
 
-      const [dataResult, countResult] = await Promise.all([
+      // Totals over EVERY invoice matching the filters (not just this page),
+      // for the summary strip above the list. Deliberately no cost/margin:
+      // Sales Staff use this instead of the Sales Summary report. Balance
+      // due per invoice mirrors the list row: max(0, net - returns) - paid,
+      // never below zero.
+      const summaryQuery = `
+        WITH f AS (
+          SELECT si.total_amount, si.discount_amount, si.tax_amount, si.net_amount,
+                 COALESCE((SELECT SUM(amount) FROM payments WHERE transaction_type = 'sale' AND transaction_id = si.id), 0) AS paid,
+                 COALESCE((SELECT SUM(total_amount) FROM sales_returns WHERE invoice_id = si.id), 0) AS returned
+          FROM sales_invoices si
+          ${whereClause}
+        )
+        SELECT COUNT(*) AS invoice_count,
+               COALESCE(SUM(total_amount), 0) AS gross_sales,
+               COALESCE(SUM(discount_amount), 0) AS discount,
+               COALESCE(SUM(tax_amount), 0) AS tax,
+               COALESCE(SUM(net_amount), 0) AS net_sales,
+               COALESCE(SUM(paid), 0) AS received,
+               COALESCE(SUM(returned), 0) AS returned,
+               COALESCE(SUM(GREATEST(GREATEST(net_amount - returned, 0) - paid, 0)), 0) AS balance_due
+        FROM f
+      `;
+
+      const [dataResult, countResult, summaryResult] = await Promise.all([
         db.query(dataQuery, params),
-        db.query(countQuery, params)
+        db.query(countQuery, params),
+        db.query(summaryQuery, params)
       ]);
 
-      res.json({ data: dataResult.rows, total: parseInt(countResult.rows[0].count), page: parseInt(page), limit: parseInt(limit) });
+      const sum = summaryResult.rows[0];
+      const summary = {
+        invoice_count: parseInt(sum.invoice_count, 10),
+        gross_sales: Number(sum.gross_sales),
+        discount: Number(sum.discount),
+        tax: Number(sum.tax),
+        net_sales: Number(sum.net_sales),
+        received: Number(sum.received),
+        returned: Number(sum.returned),
+        balance_due: Number(sum.balance_due),
+      };
+
+      res.json({ data: dataResult.rows, total: parseInt(countResult.rows[0].count), page: parseInt(page), limit: parseInt(limit), summary });
     } catch (error) {
       res.status(500).json({ error: error.message });
     }

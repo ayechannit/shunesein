@@ -508,6 +508,8 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const [invoicesPageSize, setInvoicesPageSize] = useState(10);
   const [invoicesSearch, setInvoicesSearch] = useState('');
   const [invoicesFilters, setInvoicesFilters] = useState(emptySalesFilters);
+  // Totals of every invoice matching the filters (from the list API).
+  const [invoicesSummary, setInvoicesSummary] = useState(null);
   // Route Trip filter only matters on the invoices list.
   const routeTripFilterOptions = useRouteTripOptions(defaultTab === 'invoices' ? token : null);
   const [invoicesSort, setInvoicesSort] = useState('id-desc');
@@ -667,6 +669,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         order: invoicesSort.split('-')[1].toUpperCase(),
       });
       setInvoices(response.data || []);
+      setInvoicesSummary(response.summary || null);
       setInvoicesTotal(Number(response.total || 0));
     } catch (error) {
       if (error.status === 401) {
@@ -2342,8 +2345,10 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
             customers={customers}
             warehouses={warehouses}
             tripOptions={routeTripFilterOptions}
+            salespeople={salespeople}
             showWarehouse={listType !== 'orders'}
             showRouteTrip={listType !== 'orders'}
+            showSalesperson={listType !== 'orders'}
           />
           {hasSalesFilters(filters) ? (
             <button type="button" className="master-button master-button-secondary sales-filter-clear" onClick={() => { setFilters(emptySalesFilters()); setPage(1); }}>
@@ -2351,6 +2356,39 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
             </button>
           ) : null}
         </div>
+
+        {listType === 'invoices' && invoicesSummary ? (
+          // Sales totals for whatever is filtered - no cost or margin here,
+          // so Sales Staff can check their sales without the Sales Summary report.
+          <div className="invoice-summary" aria-live="polite">
+            <div className="invoice-summary-item">
+              <span>Invoices</span>
+              <strong>{invoicesSummary.invoice_count}</strong>
+            </div>
+            <div className="invoice-summary-item">
+              <span>Gross Sales</span>
+              <strong>{formatNumber(invoicesSummary.gross_sales)}</strong>
+            </div>
+            <div className="invoice-summary-item">
+              <span>Discount</span>
+              <strong>{formatNumber(invoicesSummary.discount)}</strong>
+            </div>
+            <div className="invoice-summary-item invoice-summary-main">
+              <span>Net Sales</span>
+              <strong>{formatNumber(invoicesSummary.net_sales)}</strong>
+              {invoicesSummary.tax > 0 ? <small>incl. tax {formatNumber(invoicesSummary.tax)}</small> : null}
+            </div>
+            <div className="invoice-summary-item">
+              <span>Received</span>
+              <strong>{formatNumber(invoicesSummary.received)}</strong>
+            </div>
+            <div className="invoice-summary-item invoice-summary-due">
+              <span>Balance Due</span>
+              <strong>{formatNumber(invoicesSummary.balance_due)}</strong>
+              {invoicesSummary.returned > 0 ? <small>after returns {formatNumber(invoicesSummary.returned)}</small> : null}
+            </div>
+          </div>
+        ) : null}
 
         <div className="procurement-card">
           <DataTable

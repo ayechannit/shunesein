@@ -7,7 +7,7 @@ import { formatDate } from '../utils/datetime';
 // Orders and Sales Invoices lists and the sales reports. Dates stay plain
 // YYYY-MM-DD strings from <input type="date"> - never converted to a JS Date.
 
-export const emptySalesFilters = () => ({ from: '', to: '', customer_id: '', warehouse_id: '', route_trip_id: '' });
+export const emptySalesFilters = () => ({ from: '', to: '', customer_id: '', warehouse_id: '', route_trip_id: '', salesperson_id: '' });
 
 export const hasSalesFilters = (filters) => Object.values(filters).some(Boolean);
 
@@ -35,9 +35,11 @@ export const SalesFilterFields = ({
   customers = [],
   warehouses = [],
   tripOptions = [],
+  salespeople = [],
   showDates = true,
   showWarehouse = true,
   showRouteTrip = true,
+  showSalesperson = false,
 }) => {
   const customerOptions = useMemo(
     () => customers.map((c) => ({ value: String(c.id), label: c.phone ? `${c.name} (${c.phone})` : c.name })),
@@ -46,6 +48,10 @@ export const SalesFilterFields = ({
   const warehouseOptions = useMemo(
     () => warehouses.map((w) => ({ value: String(w.id), label: w.name })),
     [warehouses],
+  );
+  const salespersonOptions = useMemo(
+    () => salespeople.map((u) => ({ value: String(u.id), label: u.full_name || u.username })),
+    [salespeople],
   );
 
   return (
@@ -70,6 +76,12 @@ export const SalesFilterFields = ({
         <div className="form-field sales-filter-field">
           <label>Warehouse</label>
           <SearchableSelect value={values.warehouse_id} onChange={(v) => onChange('warehouse_id', v)} options={warehouseOptions} placeholder="All warehouses" searchPlaceholder="Search warehouses..." allowEmpty />
+        </div>
+      ) : null}
+      {showSalesperson ? (
+        <div className="form-field sales-filter-field">
+          <label>Salesperson</label>
+          <SearchableSelect value={values.salesperson_id} onChange={(v) => onChange('salesperson_id', v)} options={salespersonOptions} placeholder="All salespeople" searchPlaceholder="Search salespeople..." allowEmpty />
         </div>
       ) : null}
       {showRouteTrip && tripOptions.length > 0 ? (
