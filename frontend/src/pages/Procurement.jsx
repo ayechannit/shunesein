@@ -501,7 +501,7 @@ const GoodsReceiptsTab = ({ token, onLogout, embedded, warehouses, hasPermission
                   options={eligibleVouchers.map((v) => ({ value: v.id, label: `${v.voucher_number} - ${v.supplier_name || 'Unknown supplier'}` }))}
                 />
               )}
-              <FormField field={{ key: 'warehouse_id', label: 'Default Warehouse', type: 'select', placeholder: 'Optional - pre-fills each item row below' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'warehouse_id', label: 'Default Warehouse', type: 'searchable-select', placeholder: 'Optional - pre-fills each item row below' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
               <FormField field={{ key: 'receipt_date', label: 'Receipt Date', type: 'date' }} value={formValues.receipt_date} error={formErrors.receipt_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               <FormField
                 field={{ key: 'quality_rating', label: 'Quality Rating', type: 'select', placeholder: 'Select rating' }}
@@ -537,18 +537,12 @@ const GoodsReceiptsTab = ({ token, onLogout, embedded, warehouses, hasPermission
                       return (
                         <tr key={index}>
                           <td data-label="Product">
-                            <select value={lineId || ''} onChange={(e) => selectSourceItem(index, e.target.value)}>
-                              <option value="" disabled>Select item</option>
-                              {sourceItemOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                            </select>
+                            <SearchableSelect value={lineId || ''} onChange={(value) => selectSourceItem(index, value)} options={sourceItemOptions.map((opt) => ({ value: String(opt.value), label: opt.label }))} placeholder="Select item" searchPlaceholder="Search items..." />
                             {formErrors[`item-product-${index}`] ? <div className="field-error">{formErrors[`item-product-${index}`]}</div> : null}
                           </td>
                           <td data-label="Quantity" className="col-qty"><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
                           <td data-label="Warehouse" className="col-warehouse">
-                            <select value={effectiveWarehouseId} onChange={(e) => updateItem(index, 'warehouse_id', e.target.value)}>
-                              <option value="" disabled>Select warehouse</option>
-                              {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                            </select>
+                            <SearchableSelect value={effectiveWarehouseId} onChange={(value) => updateItem(index, 'warehouse_id', value)} options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))} placeholder="Select warehouse" />
                             {formErrors[`item-warehouse-${index}`] ? <div className="field-error">{formErrors[`item-warehouse-${index}`]}</div> : null}
                           </td>
                           <td data-label="Lot #" className="col-lot"><input type="text" value={item.lot_number || ''} onChange={(e) => updateItem(index, 'lot_number', e.target.value)} placeholder="Optional" /></td>
@@ -969,7 +963,7 @@ const GoodsReturnsTab = ({ token, onLogout, embedded, warehouses, hasPermission 
                   options={eligibleVouchers.map((v) => ({ value: v.id, label: `${v.voucher_number} - ${v.supplier_name || 'Unknown supplier'}` }))}
                 />
               )}
-              <FormField field={{ key: 'warehouse_id', label: 'Default Return-from Warehouse', type: 'select', placeholder: 'Optional - pre-fills each item row below' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'warehouse_id', label: 'Default Return-from Warehouse', type: 'searchable-select', placeholder: 'Optional - pre-fills each item row below' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
               <FormField field={{ key: 'return_date', label: 'Return Date', type: 'date' }} value={formValues.return_date} error={formErrors.return_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               <FormField field={{ key: 'reason', label: 'Reason', type: 'textarea' }} value={formValues.reason} error={formErrors.reason} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
             </div>
@@ -994,18 +988,12 @@ const GoodsReturnsTab = ({ token, onLogout, embedded, warehouses, hasPermission 
                       return (
                         <tr key={index}>
                           <td data-label="Product">
-                            <select value={lineId || ''} onChange={(e) => selectSourceItem(index, e.target.value)}>
-                              <option value="" disabled>Select item</option>
-                              {sourceItemOptions.map((opt) => <option key={opt.value} value={opt.value}>{opt.label}</option>)}
-                            </select>
+                            <SearchableSelect value={lineId || ''} onChange={(value) => selectSourceItem(index, value)} options={sourceItemOptions.map((opt) => ({ value: String(opt.value), label: opt.label }))} placeholder="Select item" searchPlaceholder="Search items..." />
                             {formErrors[`item-product-${index}`] ? <div className="field-error">{formErrors[`item-product-${index}`]}</div> : null}
                           </td>
                           <td data-label="Quantity" className="col-qty"><input type="number" min="0.01" step="0.01" value={item.quantity || ''} onChange={(e) => updateItem(index, 'quantity', e.target.value)} /></td>
                           <td data-label="Warehouse" className="col-warehouse">
-                            <select value={effectiveWarehouseId} onChange={(e) => updateItem(index, 'warehouse_id', e.target.value)}>
-                              <option value="" disabled>Select warehouse</option>
-                              {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                            </select>
+                            <SearchableSelect value={effectiveWarehouseId} onChange={(value) => updateItem(index, 'warehouse_id', value)} options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))} placeholder="Select warehouse" />
                             {formErrors[`item-warehouse-${index}`] ? <div className="field-error">{formErrors[`item-warehouse-${index}`]}</div> : null}
                           </td>
                           <td data-label="">
@@ -1301,11 +1289,11 @@ const SupplierDepositsTab = ({ token, onLogout, embedded, suppliers, hasPermissi
           <div className="procurement-shell">
             {formErrors.submit ? <div className="status-banner status-banner-error">{formErrors.submit}</div> : null}
             <div className="procurement-grid">
-              <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
+              <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'searchable-select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((s) => ({ value: s.id, label: s.name }))} />
               <FormField field={{ key: 'deposit_date', label: 'Deposit Date', type: 'date' }} value={formValues.deposit_date} error={formErrors.deposit_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               <FormField field={{ key: 'amount', label: 'Amount', type: 'number', required: true, placeholder: '0.00' }} value={formValues.amount} error={formErrors.amount} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
-              <FormField field={{ key: 'payment_method_id', label: 'Payment Method', type: 'select', required: true, placeholder: 'Select method' }} value={formValues.payment_method_id} error={formErrors.payment_method_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={paymentMethods.map((m) => ({ value: m.id, label: m.name }))} />
-              <FormField field={{ key: 'account_id', label: 'Account', type: 'select', placeholder: 'Select account' }} value={formValues.account_id} error={formErrors.account_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={accounts.map((a) => ({ value: a.id, label: a.name }))} />
+              <FormField field={{ key: 'payment_method_id', label: 'Payment Method', type: 'searchable-select', required: true, placeholder: 'Select method' }} value={formValues.payment_method_id} error={formErrors.payment_method_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={paymentMethods.map((m) => ({ value: m.id, label: m.name }))} />
+              <FormField field={{ key: 'account_id', label: 'Account', type: 'searchable-select', placeholder: 'Select account' }} value={formValues.account_id} error={formErrors.account_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={accounts.map((a) => ({ value: a.id, label: a.name }))} />
               <FormField field={{ key: 'reference_no', label: 'Reference No', type: 'text', placeholder: 'e.g. CHECK-001' }} value={formValues.reference_no} error={formErrors.reference_no} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               <FormField field={{ key: 'note', label: 'Note', type: 'textarea', placeholder: 'Optional note' }} value={formValues.note} error={formErrors.note} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
             </div>
@@ -2084,7 +2072,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
             {isOrder ? (
               <>
                 <FormField field={{ key: 'po_number', label: 'PO Number', type: 'text', readOnly: true }} value={formValues.po_number || ''} error={formErrors.po_number} onChange={() => {}} />
-                <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
+                <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'searchable-select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
                 <FormField field={{ key: 'order_date', label: 'Order Date', type: 'date' }} value={formValues.order_date} error={formErrors.order_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'expected_date', label: 'Expected Delivery Date', type: 'date' }} value={formValues.expected_date} error={formErrors.expected_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
@@ -2092,7 +2080,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
             ) : (
               <>
                 <FormField field={{ key: 'voucher_number', label: 'Voucher Number', type: 'text', readOnly: true }} value={formValues.voucher_number || ''} error={formErrors.voucher_number} onChange={() => {}} />
-                <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
+                <FormField field={{ key: 'supplier_id', label: 'Supplier', type: 'searchable-select', required: true, placeholder: 'Select supplier' }} value={formValues.supplier_id} error={formErrors.supplier_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={suppliers.map((supplier) => ({ value: supplier.id, label: supplier.name }))} />
                 <FormField field={{ key: 'voucher_date', label: 'Voucher Date', type: 'date' }} value={formValues.voucher_date} error={formErrors.voucher_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'received_date', label: 'Received Date', type: 'date' }} value={formValues.received_date} error={formErrors.received_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField
@@ -2618,22 +2606,18 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
                       {usingDeposit ? (
                         <div className="form-field">
                           <label>Deposit *</label>
-                          <select value={paymentForm.deposit_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, deposit_id: e.target.value }))}>
-                            <option value="">Select deposit</option>
-                            {availableDeposits.map((deposit) => (
-                              <option key={deposit.id} value={deposit.id}>
-                                {(deposit.reference_no || `Deposit #${deposit.id}`)} - {formatNumber(deposit.remaining_amount)} available
-                              </option>
-                            ))}
-                          </select>
+                          <SearchableSelect
+                            value={paymentForm.deposit_id}
+                            onChange={(value) => setPaymentForm((prev) => ({ ...prev, deposit_id: value }))}
+                            options={availableDeposits.map((deposit) => ({ value: String(deposit.id), label: `${deposit.reference_no || `Deposit #${deposit.id}`} - ${formatNumber(deposit.remaining_amount)} available` }))}
+                            placeholder="Select deposit"
+                            searchPlaceholder="Search deposits..."
+                          />
                         </div>
                       ) : (
                         <div className="form-field">
                           <label>Payment Method *</label>
-                          <select value={paymentForm.payment_method_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
-                            <option value="">Select method</option>
-                            {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
-                          </select>
+                          <SearchableSelect value={paymentForm.payment_method_id} onChange={(value) => setPaymentForm((prev) => ({ ...prev, payment_method_id: value }))} options={paymentMethods.map((method) => ({ value: String(method.id), label: method.name }))} placeholder="Select method" />
                         </div>
                       )}
                       <div className="form-field">
@@ -2647,10 +2631,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
                       {!usingDeposit ? (
                         <div className="form-field">
                           <label>Account</label>
-                          <select value={paymentForm.account_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, account_id: e.target.value }))}>
-                            <option value="">Select account</option>
-                            {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-                          </select>
+                          <SearchableSelect value={paymentForm.account_id} onChange={(value) => setPaymentForm((prev) => ({ ...prev, account_id: value }))} options={accounts.map((account) => ({ value: String(account.id), label: account.name }))} placeholder="Select account" allowEmpty />
                         </div>
                       ) : null}
                       <div className="form-field">
@@ -2726,10 +2707,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
             ) : (
               <div className="form-field">
                 <label>Payment Method *</label>
-                <select value={paymentEditForm.payment_method_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
-                  <option value="">Select method</option>
-                  {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
-                </select>
+                <SearchableSelect value={paymentEditForm.payment_method_id} onChange={(value) => setPaymentEditForm((prev) => ({ ...prev, payment_method_id: value }))} options={paymentMethods.map((method) => ({ value: String(method.id), label: method.name }))} placeholder="Select method" />
               </div>
             )}
             <div className="form-field">
@@ -2743,10 +2721,7 @@ const Procurement = ({ token, onLogout, embedded = false, defaultTab = 'orders',
             {!paymentEditForm.fundedByDeposit ? (
               <div className="form-field">
                 <label>Account</label>
-                <select value={paymentEditForm.account_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, account_id: e.target.value }))}>
-                  <option value="">Select account</option>
-                  {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-                </select>
+                <SearchableSelect value={paymentEditForm.account_id} onChange={(value) => setPaymentEditForm((prev) => ({ ...prev, account_id: value }))} options={accounts.map((account) => ({ value: String(account.id), label: account.name }))} placeholder="Select account" allowEmpty />
               </div>
             ) : null}
             <div className="form-field">

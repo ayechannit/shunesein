@@ -61,6 +61,7 @@ import {
 import { fetchPrintPageSetups, toPageSettings } from '../services/printSetupService';
 import { fetchUsersForFilter } from '../services/auditService';
 import { fetchOpenTrips } from '../services/routeService';
+import { SalesFilterFields, emptySalesFilters, hasSalesFilters, useRouteTripOptions } from '../components/SalesFilters';
 import { openPrintDocument } from '../utils/printDocument';
 import { formatDate, formatDateTime, todayLocal as today } from '../utils/datetime';
 
@@ -73,12 +74,23 @@ const formatNumber = (value) => {
   return new Intl.NumberFormat('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(numeric);
 };
 
+// "Needs delivery" + where to deliver (sale orders and invoices). Address and
+// phone are pre-filled from the customer when the box is ticked, but saved
+// only on this order/invoice - never back to the customer.
+const emptyDelivery = () => ({ needs_delivery: false, delivery_address: '', delivery_phone: '' });
+const deliveryFromRecord = (record) => ({
+  needs_delivery: Boolean(record?.needs_delivery),
+  delivery_address: record?.delivery_address || '',
+  delivery_phone: record?.delivery_phone || '',
+});
+
 const emptyOrderForm = () => ({
   so_number: '',
   customer_id: '',
   salesperson_id: '',
   order_date: today(),
   remark: '',
+  ...emptyDelivery(),
   items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }],
 });
 
@@ -91,6 +103,7 @@ const emptyInvoiceForm = () => ({
   route_trip_id: '',
   invoice_date: today(),
   remark: '',
+  ...emptyDelivery(),
   discount_amount: '0',
   tax_amount: '0',
   items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }],
@@ -369,8 +382,8 @@ const SalesReturnsTab = ({ token, onLogout, embedded, customers, warehouses, pro
           <div className="procurement-shell">
             {formErrors.submit ? <div className="status-banner status-banner-error">{formErrors.submit}</div> : null}
             <div className="procurement-grid">
-              <FormField field={{ key: 'customer_id', label: 'Customer', type: 'select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((c) => ({ value: c.id, label: c.name }))} />
-              <FormField field={{ key: 'warehouse_id', label: 'Return-to Warehouse', type: 'select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
+              <FormField field={{ key: 'customer_id', label: 'Customer', type: 'searchable-select', required: true, placeholder: 'Select customer' }} value={formValues.customer_id} error={formErrors.customer_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={customers.map((c) => ({ value: c.id, label: c.name }))} />
+              <FormField field={{ key: 'warehouse_id', label: 'Return-to Warehouse', type: 'searchable-select', required: true, placeholder: 'Select warehouse' }} value={formValues.warehouse_id} error={formErrors.warehouse_id} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} options={warehouses.map((w) => ({ value: w.id, label: w.name }))} />
               <FormField field={{ key: 'return_date', label: 'Return Date', type: 'date' }} value={formValues.return_date} error={formErrors.return_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
               <FormField field={{ key: 'reason', label: 'Reason', type: 'textarea' }} value={formValues.reason} error={formErrors.reason} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
             </div>
@@ -485,6 +498,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const [ordersPage, setOrdersPage] = useState(1);
   const [ordersPageSize, setOrdersPageSize] = useState(10);
   const [ordersSearch, setOrdersSearch] = useState('');
+  const [ordersFilters, setOrdersFilters] = useState(emptySalesFilters);
   const [ordersSort, setOrdersSort] = useState('id-desc');
   const [ordersLoading, setOrdersLoading] = useState(false);
   const [ordersError, setOrdersError] = useState('');
@@ -493,6 +507,9 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   const [invoicesPage, setInvoicesPage] = useState(1);
   const [invoicesPageSize, setInvoicesPageSize] = useState(10);
   const [invoicesSearch, setInvoicesSearch] = useState('');
+  const [invoicesFilters, setInvoicesFilters] = useState(emptySalesFilters);
+  // Route Trip filter only matters on the invoices list.
+  const routeTripFilterOptions = useRouteTripOptions(defaultTab === 'invoices' ? token : null);
   const [invoicesSort, setInvoicesSort] = useState('id-desc');
   const [invoicesLoading, setInvoicesLoading] = useState(false);
   const [invoicesError, setInvoicesError] = useState('');
@@ -617,6 +634,9 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         page: ordersPage,
         limit: ordersPageSize,
         search: ordersSearch,
+        from: ordersFilters.from,
+        to: ordersFilters.to,
+        customer_id: ordersFilters.customer_id,
         sortBy: ordersSort.split('-')[0],
         order: ordersSort.split('-')[1].toUpperCase(),
       });
@@ -642,6 +662,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         page: invoicesPage,
         limit: invoicesPageSize,
         search: invoicesSearch,
+        ...invoicesFilters,
         sortBy: invoicesSort.split('-')[0],
         order: invoicesSort.split('-')[1].toUpperCase(),
       });
@@ -665,12 +686,12 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
   useEffect(() => {
     loadOrders();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, ordersPage, ordersPageSize, ordersSearch, ordersSort, defaultTab]);
+  }, [token, ordersPage, ordersPageSize, ordersSearch, ordersSort, ordersFilters, defaultTab]);
 
   useEffect(() => {
     loadInvoices();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token, invoicesPage, invoicesPageSize, invoicesSearch, invoicesSort, defaultTab]);
+  }, [token, invoicesPage, invoicesPageSize, invoicesSearch, invoicesSort, invoicesFilters, defaultTab]);
 
 
   // Document numbers are generated once, when the form opens, so the number
@@ -784,6 +805,9 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         if (!item.unit_price || Number(item.unit_price) <= 0) nextErrors[`item-price-${index}`] = 'Price must be greater than 0.';
       });
     }
+    if (formValues.needs_delivery && !formValues.route_trip_id && !String(formValues.delivery_address || '').trim()) {
+      nextErrors.delivery_address = 'Delivery address is required when "Needs delivery" is ticked.';
+    }
     // Unit Price is read-only (it comes from the product / price level), so a
     // zero price can't be fixed on this form - say where to fix it instead.
     Object.keys(nextErrors).forEach((key) => {
@@ -818,6 +842,8 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
       const payload = {
         ...formValues,
         customer_id: Number(formValues.customer_id),
+        // Sold from a van/motorcycle on a route trip = handed over on the spot.
+        needs_delivery: Boolean(formValues.needs_delivery) && !formValues.route_trip_id,
         items: formValues.items.map((item) => ({
           ...item,
           product_id: Number(item.product_id),
@@ -907,6 +933,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         salesperson_id: String(row.salesperson_id || ''),
         order_date: row.order_date ? String(row.order_date).slice(0, 10) : '',
         remark: row.remark || '',
+        ...deliveryFromRecord(row),
         items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }],
       });
       fetchSaleOrderById(token, row.id)
@@ -935,6 +962,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         warehouse_id: String(row.warehouse_id || ''),
         invoice_date: row.invoice_date ? String(row.invoice_date).slice(0, 10) : '',
         remark: row.remark || '',
+        ...deliveryFromRecord(row),
         discount_amount: String(row.discount_amount || '0'),
         tax_amount: String(row.tax_amount || '0'),
         items: [{ product_id: '', quantity: '1', unit_price: '0', discount_percent: '0', price_level_id: '' }],
@@ -1054,6 +1082,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
         warehouse_id: '',
         invoice_date: new Date().toISOString().slice(0, 10),
         remark: orderData.remark || '',
+        ...deliveryFromRecord(orderData),
         discount_amount: '0',
         tax_amount: '0',
         items: items.map((item) => ({
@@ -1333,13 +1362,80 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
 
     const setFormField = (key, value) => setFormValues((previous) => ({ ...previous, [key]: value }));
 
+    const customerContact = (customerId) => {
+      const customer = customers.find((c) => String(c.id) === String(customerId));
+      return { address: customer?.address || '', phone: customer?.phone || '' };
+    };
+
+    // Changing the customer while "Needs delivery" is ticked swaps in the new
+    // customer's address/phone - unless the user already typed their own.
+    const changeCustomer = (value) => setFormValues((previous) => {
+      const next = { ...previous, customer_id: value };
+      if (previous.needs_delivery) {
+        const before = customerContact(previous.customer_id);
+        const after = customerContact(value);
+        if (!previous.delivery_address || previous.delivery_address === before.address) next.delivery_address = after.address;
+        if (!previous.delivery_phone || previous.delivery_phone === before.phone) next.delivery_phone = after.phone;
+      }
+      return next;
+    });
+
+    const toggleNeedsDelivery = (checked) => {
+      setFormValues((previous) => {
+        if (!checked) return { ...previous, needs_delivery: false };
+        const contact = customerContact(previous.customer_id);
+        return {
+          ...previous,
+          needs_delivery: true,
+          delivery_address: previous.delivery_address || contact.address,
+          delivery_phone: previous.delivery_phone || contact.phone,
+        };
+      });
+      setFormErrors((previous) => ({ ...previous, delivery_address: undefined }));
+    };
+
+    // Hidden for route-trip sales: those are handed over from the vehicle.
+    const deliveryFields = formValues.route_trip_id ? null : (
+      <div className="form-field form-field-full delivery-fields">
+        <label className="checkbox-field" htmlFor="needs-delivery">
+          <input id="needs-delivery" type="checkbox" checked={Boolean(formValues.needs_delivery)} onChange={(e) => toggleNeedsDelivery(e.target.checked)} />
+          <span>Needs delivery</span>
+        </label>
+        {formValues.needs_delivery ? (
+          <div className="delivery-fields-grid">
+            <div className="form-field">
+              <label htmlFor="delivery-address">Delivery Address *</label>
+              <textarea
+                id="delivery-address"
+                rows={2}
+                value={formValues.delivery_address || ''}
+                placeholder="Where should the goods go?"
+                aria-invalid={Boolean(formErrors.delivery_address)}
+                onChange={(e) => {
+                  setFormField('delivery_address', e.target.value);
+                  if (formErrors.delivery_address) setFormErrors((previous) => ({ ...previous, delivery_address: undefined }));
+                }}
+              />
+              {formErrors.delivery_address
+                ? <span className="field-error">{formErrors.delivery_address}</span>
+                : <span className="field-hint">Filled in from the customer. Changing it here does not change the customer.</span>}
+            </div>
+            <div className="form-field">
+              <label htmlFor="delivery-phone">Contact Phone</label>
+              <input id="delivery-phone" type="text" value={formValues.delivery_phone || ''} placeholder="Optional" onChange={(e) => setFormField('delivery_phone', e.target.value)} />
+            </div>
+          </div>
+        ) : null}
+      </div>
+    );
+
     const customerField = (
       <div className="form-field">
         <label>Customer *</label>
         <div className="field-with-action">
           <SearchableSelect
             value={formValues.customer_id == null ? '' : String(formValues.customer_id)}
-            onChange={(value) => setFormField('customer_id', value)}
+            onChange={changeCustomer}
             options={customerOptions}
             placeholder="Select customer"
             searchPlaceholder="Search name or phone..."
@@ -1402,6 +1498,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                 {salespersonField}
                 <FormField field={{ key: 'order_date', label: 'Order Date', type: 'date' }} value={formValues.order_date} error={formErrors.order_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+                {deliveryFields}
               </>
             ) : (
               <>
@@ -1427,6 +1524,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                 <FormField field={{ key: 'warehouse_id', label: 'Warehouse', type: 'searchable-select', required: true, placeholder: 'Select warehouse', searchPlaceholder: 'Search warehouses...' }} value={formValues.warehouse_id == null ? '' : String(formValues.warehouse_id)} error={formErrors.warehouse_id} onChange={setFormField} options={warehouseOptions} />
                 <FormField field={{ key: 'invoice_date', label: 'Invoice Date', type: 'date' }} value={formValues.invoice_date} error={formErrors.invoice_date} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
                 <FormField field={{ key: 'remark', label: 'Remark', type: 'textarea' }} value={formValues.remark} error={formErrors.remark} onChange={(key, value) => setFormValues((previous) => ({ ...previous, [key]: value }))} />
+                {deliveryFields}
               </>
             )}
           </div>
@@ -1838,6 +1936,14 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                 <span className="detail-label">Created at</span>
                 <span className="detail-value">{formatDateTime(viewRecord.created_at)}</span>
               </div>
+              <div className="detail-item detail-item-full">
+                <span className="detail-label">Delivery</span>
+                <span className="detail-value">
+                  {viewRecord.needs_delivery
+                    ? `${viewRecord.delivery_address || '-'}${viewRecord.delivery_phone ? ` (Phone: ${viewRecord.delivery_phone})` : ''}`
+                    : 'Not needed'}
+                </span>
+              </div>
               {viewRecord.remark && (
                 <div className="detail-item detail-item-full">
                   <span className="detail-label">Remark</span>
@@ -1946,10 +2052,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                     <div className="procurement-grid">
                       <div className="form-field">
                         <label>Payment Method *</label>
-                        <select value={paymentForm.payment_method_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
-                          <option value="">Select method</option>
-                          {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
-                        </select>
+                        <SearchableSelect value={paymentForm.payment_method_id} onChange={(value) => setPaymentForm((prev) => ({ ...prev, payment_method_id: value }))} options={paymentMethods.map((method) => ({ value: String(method.id), label: method.name }))} placeholder="Select method" />
                       </div>
                       <div className="form-field">
                         <label>Amount * (max {formatNumber(remaining)})</label>
@@ -1961,10 +2064,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
                       </div>
                       <div className="form-field">
                         <label>Account</label>
-                        <select value={paymentForm.account_id} onChange={(e) => setPaymentForm((prev) => ({ ...prev, account_id: e.target.value }))}>
-                          <option value="">Select account</option>
-                          {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-                        </select>
+                        <SearchableSelect value={paymentForm.account_id} onChange={(value) => setPaymentForm((prev) => ({ ...prev, account_id: value }))} options={accounts.map((account) => ({ value: String(account.id), label: account.name }))} placeholder="Select account" allowEmpty />
                       </div>
                       <div className="form-field">
                         <label>Reference No</label>
@@ -2028,10 +2128,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
           <div className="procurement-grid">
             <div className="form-field">
               <label>Payment Method *</label>
-              <select value={paymentEditForm.payment_method_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, payment_method_id: e.target.value }))}>
-                <option value="">Select method</option>
-                {paymentMethods.map((method) => <option key={method.id} value={method.id}>{method.name}</option>)}
-              </select>
+              <SearchableSelect value={paymentEditForm.payment_method_id} onChange={(value) => setPaymentEditForm((prev) => ({ ...prev, payment_method_id: value }))} options={paymentMethods.map((method) => ({ value: String(method.id), label: method.name }))} placeholder="Select method" />
             </div>
             <div className="form-field">
               <label>Amount *</label>
@@ -2043,10 +2140,7 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
             </div>
             <div className="form-field">
               <label>Account</label>
-              <select value={paymentEditForm.account_id} onChange={(e) => setPaymentEditForm((prev) => ({ ...prev, account_id: e.target.value }))}>
-                <option value="">Select account</option>
-                {accounts.map((account) => <option key={account.id} value={account.id}>{account.name}</option>)}
-              </select>
+              <SearchableSelect value={paymentEditForm.account_id} onChange={(value) => setPaymentEditForm((prev) => ({ ...prev, account_id: value }))} options={accounts.map((account) => ({ value: String(account.id), label: account.name }))} placeholder="Select account" allowEmpty />
             </div>
             <div className="form-field">
               <label>Reference No</label>
@@ -2181,6 +2275,13 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
     const createAction = listType === 'orders' ? handleCreateOrder : handleCreateInvoice;
 
     const loadAction = listType === 'orders' ? loadOrders : loadInvoices;
+    const filters = listType === 'orders' ? ordersFilters : invoicesFilters;
+    const setFilters = listType === 'orders' ? setOrdersFilters : setInvoicesFilters;
+    // Any filter change goes back to page 1; the list reloads via its effect.
+    const changeFilter = (key, value) => {
+      setFilters((previous) => ({ ...previous, [key]: value }));
+      setPage(1);
+    };
 
     return (
       <div className="procurement-shell">
@@ -2232,6 +2333,23 @@ const Sales = ({ token, onLogout, embedded = false, defaultTab = 'orders', hasPe
               </AppButton>
             ) : null}
           </div>
+        </div>
+
+        <div className="sales-filter-bar">
+          <SalesFilterFields
+            values={filters}
+            onChange={changeFilter}
+            customers={customers}
+            warehouses={warehouses}
+            tripOptions={routeTripFilterOptions}
+            showWarehouse={listType !== 'orders'}
+            showRouteTrip={listType !== 'orders'}
+          />
+          {hasSalesFilters(filters) ? (
+            <button type="button" className="master-button master-button-secondary sales-filter-clear" onClick={() => { setFilters(emptySalesFilters()); setPage(1); }}>
+              Clear filters
+            </button>
+          ) : null}
         </div>
 
         <div className="procurement-card">

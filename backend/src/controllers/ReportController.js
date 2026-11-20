@@ -94,20 +94,22 @@ const computeProfitLossSummary = async (from, to) => {
 // figures worth comparing period-over-period, not the full by_product/
 // by_customer/by_supplier breakdown (re-running that for a second period
 // the user didn't ask to see in detail would be wasted work).
-const computeSalesTotalsOnly = async (from, to) => {
+const computeSalesTotalsOnly = async (from, to, query = {}) => {
+  const F = salesInvoiceFilters(query);
+  const F0 = salesInvoiceFilters(query, '');
   const [totals, costResult] = await Promise.all([
     db.query(
       `SELECT COUNT(*) as invoice_count, COALESCE(SUM(total_amount - discount_amount), 0) as net_sales
-       FROM sales_invoices WHERE invoice_date BETWEEN $1 AND $2`,
-      [from, to]
+       FROM sales_invoices WHERE invoice_date BETWEEN $1 AND $2${F0.sql}`,
+      [from, to, ...F0.params]
     ),
     db.query(
       `SELECT COALESCE(SUM(si.quantity * p.cost_price), 0) as total_cost
        FROM sales_items si
        JOIN sales_invoices inv ON si.invoice_id = inv.id
        JOIN products p ON si.product_id = p.id
-       WHERE inv.invoice_date BETWEEN $1 AND $2`,
-      [from, to]
+       WHERE inv.invoice_date BETWEEN $1 AND $2${F.sql}`,
+      [from, to, ...F.params]
     ),
   ]);
   const t = totals.rows[0];
@@ -123,6 +125,25 @@ const computePurchaseTotalsOnly = async (from, to) => {
   );
   const row = result.rows[0];
   return { voucher_count: toInt(row.voucher_count), net_amount: toNumber(row.net_amount) };
+};
+
+// Optional Customer / Warehouse / Route Trip filters shared by the sales
+// reports (Sales Summary, Sales by Category, Salesperson Performance). The
+// date range is always $1/$2, so these continue from $3. prefix is the
+// sales_invoices alias in the query ('inv.') or '' for an unaliased table.
+const salesInvoiceFilters = (query, prefix = 'inv.') => {
+  const clauses = [];
+  const params = [];
+  const add = (column, raw) => {
+    const value = Number(raw);
+    if (!raw || !Number.isInteger(value) || value <= 0) return;
+    params.push(value);
+    clauses.push(` AND ${prefix}${column} = $${params.length + 2}`);
+  };
+  add('customer_id', query.customer_id);
+  add('warehouse_id', query.warehouse_id);
+  add('route_trip_id', query.route_trip_id);
+  return { sql: clauses.join(''), params };
 };
 
 class ReportController {
@@ -431,6 +452,8 @@ class ReportController {
   getSalesSummary = async (req, res) => {
     try {
       const { from, to } = resolveDateRange(req.query.startDate || req.query.from, req.query.endDate || req.query.to);
+      const F = salesInvoiceFilters(req.query);
+      const F0 = salesInvoiceFilters(req.query, '');
 
       const [totals, byProduct, byCustomer, byCustomerCost] = await Promise.all([
         db.query(
@@ -439,8 +462,8 @@ class ReportController {
                   COALESCE(SUM(discount_amount), 0) as sales_discounts,
                   COALESCE(SUM(tax_amount), 0) as sales_tax_collected,
                   COALESCE(SUM(total_amount - discount_amount), 0) as net_sales
-           FROM sales_invoices WHERE invoice_date BETWEEN $1 AND $2`,
-          [from, to]
+           FROM sales_invoices WHERE invoice_date BETWEEN $1 AND $2${F0.sql}`,
+          [from, to, ...F0.params]
         ),
         db.query(
           `SELECT p.id as product_id, p.name as product_name, p.product_code, p.unit,
@@ -449,20 +472,20 @@ class ReportController {
            FROM sales_items si
            JOIN sales_invoices inv ON si.invoice_id = inv.id
            JOIN products p ON si.product_id = p.id
-           WHERE inv.invoice_date BETWEEN $1 AND $2
+           WHERE inv.invoice_date BETWEEN $1 AND $2${F.sql}
            GROUP BY p.id, p.name, p.product_code, p.unit
            ORDER BY total_revenue DESC`,
-          [from, to]
+          [from, to, ...F.params]
         ),
         db.query(
           `SELECT c.id as customer_id, c.name as customer_name,
                   COUNT(inv.id) as invoice_count, COALESCE(SUM(inv.total_amount - inv.discount_amount), 0) as total_amount
            FROM sales_invoices inv
            JOIN customers c ON inv.customer_id = c.id
-           WHERE inv.invoice_date BETWEEN $1 AND $2
+           WHERE inv.invoice_date BETWEEN $1 AND $2${F.sql}
            GROUP BY c.id, c.name
            ORDER BY total_amount DESC`,
-          [from, to]
+          [from, to, ...F.params]
         ),
         // Cost per customer, computed separately from by_customer above -
         // joining sales_items into that invoice-level aggregation would fan
@@ -472,9 +495,9 @@ class ReportController {
            FROM sales_items si
            JOIN sales_invoices inv ON si.invoice_id = inv.id
            JOIN products p ON si.product_id = p.id
-           WHERE inv.invoice_date BETWEEN $1 AND $2
+           WHERE inv.invoice_date BETWEEN $1 AND $2${F.sql}
            GROUP BY inv.customer_id`,
-          [from, to]
+          [from, to, ...F.params]
         ),
       ]);
 
@@ -517,7 +540,7 @@ class ReportController {
       let previous = null;
       if (req.query.compare === 'true') {
         const prevRange = resolvePreviousRange(from, to);
-        previous = { ...(await computeSalesTotalsOnly(prevRange.from, prevRange.to)), from: prevRange.from, to: prevRange.to };
+        previous = { ...(await computeSalesTotalsOnly(prevRange.from, prevRange.to, req.query)), from: prevRange.from, to: prevRange.to };
       }
 
       res.json({
@@ -1564,6 +1587,8 @@ class ReportController {
   getSalespersonPerformance = async (req, res) => {
     try {
       const { from, to } = resolveDateRange(req.query.from, req.query.to);
+      const F = salesInvoiceFilters(req.query);
+      const F0 = salesInvoiceFilters(req.query, '');
       const [result, unassignedResult] = await Promise.all([
         db.query(
           `SELECT u.id as salesperson_id, u.full_name as salesperson_name,
@@ -1571,15 +1596,15 @@ class ReportController {
                   COALESCE(SUM(inv.total_amount - inv.discount_amount), 0) as net_sales
            FROM sales_invoices inv
            JOIN users u ON inv.salesperson_id = u.id
-           WHERE inv.invoice_date BETWEEN $1 AND $2
+           WHERE inv.invoice_date BETWEEN $1 AND $2${F.sql}
            GROUP BY u.id, u.full_name
            ORDER BY net_sales DESC`,
-          [from, to]
+          [from, to, ...F.params]
         ),
         db.query(
           `SELECT COUNT(*) as invoice_count, COALESCE(SUM(total_amount - discount_amount), 0) as net_sales
-           FROM sales_invoices WHERE invoice_date BETWEEN $1 AND $2 AND salesperson_id IS NULL`,
-          [from, to]
+           FROM sales_invoices WHERE invoice_date BETWEEN $1 AND $2${F0.sql} AND salesperson_id IS NULL`,
+          [from, to, ...F0.params]
         ),
       ]);
 
@@ -1932,6 +1957,7 @@ class ReportController {
   getSalesByCategory = async (req, res) => {
     try {
       const { from, to } = resolveDateRange(req.query.from, req.query.to);
+      const F = salesInvoiceFilters(req.query);
 
       const result = await db.query(
         `SELECT COALESCE(cat.id, 0) as category_id, COALESCE(cat.name, 'Uncategorized') as category_name,
@@ -1941,10 +1967,10 @@ class ReportController {
          JOIN sales_invoices inv ON si.invoice_id = inv.id
          JOIN products p ON si.product_id = p.id
          LEFT JOIN categories cat ON p.category_id = cat.id
-         WHERE inv.invoice_date BETWEEN $1 AND $2
+         WHERE inv.invoice_date BETWEEN $1 AND $2${F.sql}
          GROUP BY cat.id, cat.name
          ORDER BY total_revenue DESC`,
-        [from, to]
+        [from, to, ...F.params]
       );
 
       const items = result.rows.map((row) => {

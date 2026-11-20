@@ -25,6 +25,7 @@ import {
   PencilIcon,
   ShieldIcon,
   TrashIcon,
+  SearchableSelect,
 } from '../components/masterData/MasterDataPrimitives';
 import Dashboard from './Dashboard';
 import Procurement from './Procurement';
@@ -1849,14 +1850,13 @@ const MasterDataManagement = ({ token, onLogout }) => {
               </div>
               <div className="form-field">
                 <label>Timezone</label>
-                <select
+                <SearchableSelect
                   value={profileDialog.values.timezone}
-                  onChange={(e) => setProfileDialog((previous) => ({ ...previous, values: { ...previous.values, timezone: e.target.value } }))}
-                >
-                  {listTimezones().map((tz) => (
-                    <option key={tz} value={tz}>{tz}</option>
-                  ))}
-                </select>
+                  onChange={(value) => setProfileDialog((previous) => ({ ...previous, values: { ...previous.values, timezone: value } }))}
+                  options={listTimezones().map((tz) => ({ value: tz, label: tz }))}
+                  placeholder="Select timezone"
+                  searchPlaceholder="Search timezones..."
+                />
               </div>
             </div>
           </div>

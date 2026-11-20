@@ -20,12 +20,46 @@ const INVOICE_AGG_CTE = `
   WITH invoice_agg AS (
     SELECT di.delivery_id,
            STRING_AGG(si.invoice_number, ', ' ORDER BY si.invoice_number) AS invoice_numbers,
-           ARRAY_AGG(si.id ORDER BY si.invoice_number) AS invoice_ids
+           ARRAY_AGG(si.id ORDER BY si.invoice_number) AS invoice_ids,
+           JSON_AGG(JSON_BUILD_OBJECT(
+             'id', si.id,
+             'invoice_number', si.invoice_number,
+             'customer_name', c.name,
+             'delivery_address', si.delivery_address,
+             'delivery_phone', si.delivery_phone
+           ) ORDER BY si.invoice_number) AS invoices
     FROM delivery_invoices di
     JOIN sales_invoices si ON si.id = di.invoice_id
+    LEFT JOIN customers c ON c.id = si.customer_id
     GROUP BY di.delivery_id
   )
 `;
+
+// An invoice can go on a delivery when it is ticked "Needs delivery", is not
+// on a van/motorcycle route trip (that trip is how it gets delivered), and is
+// not already on another delivery. A failed delivery releases its invoices so
+// they can be sent again. When editing, the delivery's own invoices stay
+// selectable even if they no longer qualify (e.g. pre-dating this rule).
+const DELIVERABLE_WHERE = `
+  (si.needs_delivery AND si.route_trip_id IS NULL AND NOT EXISTS (
+     SELECT 1 FROM delivery_invoices di JOIN deliveries d ON d.id = di.delivery_id
+     WHERE di.invoice_id = si.id AND d.status <> 'failed'
+       AND ($1::int IS NULL OR d.id <> $1::int)
+   ))
+  OR ($1::int IS NOT NULL AND EXISTS (
+     SELECT 1 FROM delivery_invoices di WHERE di.invoice_id = si.id AND di.delivery_id = $1::int
+   ))
+`;
+
+const assertDeliverable = async (client, ids, deliveryId = null) => {
+  const result = await client.query(
+    `SELECT si.id FROM sales_invoices si WHERE si.id = ANY($2) AND (${DELIVERABLE_WHERE})`,
+    [deliveryId, ids]
+  );
+  if (result.rows.length !== ids.length) {
+    throw new HttpError(400, 'Some selected invoices cannot be delivered: they were not found, are not ticked "Needs delivery", are on a route trip, or are already on another delivery.');
+  }
+};
 
 class DeliveryController {
   // List Deliveries
@@ -44,7 +78,8 @@ class DeliveryController {
 
       const dataQuery = `
         ${INVOICE_AGG_CTE}
-        SELECT d.*, COALESCE(inv.invoice_numbers, '') AS invoice_numbers, COALESCE(inv.invoice_ids, '{}') AS invoice_ids
+        SELECT d.*, COALESCE(inv.invoice_numbers, '') AS invoice_numbers, COALESCE(inv.invoice_ids, '{}') AS invoice_ids,
+               COALESCE(inv.invoices, '[]'::json) AS invoices
         FROM deliveries d
         LEFT JOIN invoice_agg inv ON inv.delivery_id = d.id
         ${whereClause}
@@ -67,6 +102,26 @@ class DeliveryController {
     }
   };
 
+  // Invoices for the New/Edit Delivery picker, with where each one goes.
+  // ?delivery_id= keeps that delivery's own invoices in the list when editing.
+  getDeliverableInvoices = async (req, res) => {
+    try {
+      const deliveryId = req.query.delivery_id ? Number(req.query.delivery_id) : null;
+      const result = await db.query(
+        `SELECT si.id, si.invoice_number, si.invoice_date, si.net_amount, si.delivery_address, si.delivery_phone,
+                c.name AS customer_name
+         FROM sales_invoices si
+         LEFT JOIN customers c ON c.id = si.customer_id
+         WHERE ${DELIVERABLE_WHERE}
+         ORDER BY si.id DESC`,
+        [deliveryId]
+      );
+      res.json({ data: result.rows });
+    } catch (error) {
+      res.status(500).json({ error: error.message });
+    }
+  };
+
   // Create Delivery
   create = async (req, res) => {
     try {
@@ -78,10 +133,7 @@ class DeliveryController {
       }
 
       const delivery = await db.withTransaction(async (client) => {
-        const invoiceResult = await client.query('SELECT id FROM sales_invoices WHERE id = ANY($1)', [ids]);
-        if (invoiceResult.rows.length !== ids.length) {
-          throw new HttpError(400, 'One or more selected sales invoices were not found.');
-        }
+        await assertDeliverable(client, ids);
 
         const insertResult = await client.query(
           `INSERT INTO deliveries (delivery_number, date, vehicle_info, driver_name, status, remark)
@@ -132,10 +184,7 @@ class DeliveryController {
       }
 
       const delivery = await db.withTransaction(async (client) => {
-        const invoiceResult = await client.query('SELECT id FROM sales_invoices WHERE id = ANY($1)', [ids]);
-        if (invoiceResult.rows.length !== ids.length) {
-          throw new HttpError(400, 'One or more selected sales invoices were not found.');
-        }
+        await assertDeliverable(client, ids, Number(id));
 
         const updateResult = await client.query(
           `UPDATE deliveries SET delivery_number = $1, date = $2, vehicle_info = $3, driver_name = $4, remark = $5

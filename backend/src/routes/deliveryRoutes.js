@@ -10,6 +10,7 @@ const guardDelete = checkPermission(MANAGE_DELIVERY_DELETE);
 
 // Delivery Routes
 router.get('/', verifyToken, deliveryCtrl.getAll);
+router.get('/deliverable-invoices', verifyToken, deliveryCtrl.getDeliverableInvoices);
 router.post('/', verifyToken, guardCreate, deliveryCtrl.create);
 router.put('/:id', verifyToken, guardEdit, deliveryCtrl.update);
 router.delete('/:id', verifyToken, guardDelete, deliveryCtrl.delete);

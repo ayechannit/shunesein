@@ -6,16 +6,61 @@ const HttpError = require('../utils/HttpError');
 const { roleHasPermission } = require('../middleware/auth');
 const { MANAGE_SALES_INVOICES_EDIT_PAID, MANAGE_SALES_INVOICES_DELETE_PAID } = require('../utils/permissions');
 
+// "Needs delivery" + where to deliver, shared by sale orders and invoices.
+// The form pre-fills address/phone from the customer, but they are stored
+// per order/invoice and never written back to the customer. When delivery
+// is not needed the address/phone are cleared so stale text can't linger.
+// Returns { error } when the box is ticked without an address.
+// List filters for the Sale Orders / Sales Invoices screens. Dates are civil
+// YYYY-MM-DD strings compared in SQL (never via a JS Date). Each entry is
+// [query key, SQL column, kind]; ids must be positive integers.
+const buildListWhere = (query, alias, numberColumn, filterDefs) => {
+  const clauses = [];
+  const params = [];
+  const search = String(query.search || '').trim();
+  if (search) {
+    params.push(`%${search}%`);
+    clauses.push(`${alias}.${numberColumn} ILIKE $${params.length}`);
+  }
+  const isDate = (v) => /^\d{4}-\d{2}-\d{2}$/.test(String(v || ''));
+  for (const [key, column, kind] of filterDefs) {
+    const raw = query[key];
+    if (kind === 'from' && isDate(raw)) {
+      params.push(raw);
+      clauses.push(`${alias}.${column} >= $${params.length}::date`);
+    } else if (kind === 'to' && isDate(raw)) {
+      params.push(raw);
+      clauses.push(`${alias}.${column} <= $${params.length}::date`);
+    } else if (kind === 'id' && Number.isInteger(Number(raw)) && Number(raw) > 0) {
+      params.push(Number(raw));
+      clauses.push(`${alias}.${column} = $${params.length}`);
+    }
+  }
+  return { whereClause: clauses.length ? `WHERE ${clauses.join(' AND ')}` : '', params };
+};
+
+const readDeliveryFields = (body) => {
+  const needs_delivery = body.needs_delivery === true || body.needs_delivery === 'true';
+  if (!needs_delivery) return { needs_delivery: false, delivery_address: null, delivery_phone: null };
+  const delivery_address = String(body.delivery_address || '').trim();
+  const delivery_phone = String(body.delivery_phone || '').trim();
+  if (!delivery_address) return { error: 'Delivery address is required when "Needs delivery" is ticked.' };
+  return { needs_delivery: true, delivery_address, delivery_phone: delivery_phone || null };
+};
+
 class SalesController {
   // List Sale Orders
   getAllOrders = async (req, res) => {
     try {
-      let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'DESC' } = req.query;
+      let { page = 1, limit = 10, sortBy = 'id', order = 'DESC' } = req.query;
       page = Math.max(1, parseInt(page, 10) || 1);
       limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
-      let whereClause = search ? 'WHERE so_number ILIKE $1' : '';
-      let params = search ? [`%${search}%`] : [];
+      const { whereClause, params } = buildListWhere(req.query, 'so', 'so_number', [
+        ['from', 'order_date', 'from'],
+        ['to', 'order_date', 'to'],
+        ['customer_id', 'customer_id', 'id'],
+      ]);
 
       const allowedSortColumns = ['id', 'so_number', 'customer_id', 'order_date', 'total_amount', 'discount_amount', 'net_amount', 'status', 'created_at'];
       if (!allowedSortColumns.includes(sortBy)) sortBy = 'id';
@@ -83,6 +128,8 @@ class SalesController {
       const { id } = req.params;
       const { customer_id, order_date, remark, items } = req.body;
       const salesperson_id = req.body.salesperson_id ? Number(req.body.salesperson_id) : null;
+      const delivery = readDeliveryFields(req.body);
+      if (delivery.error) return res.status(400).json({ error: delivery.error });
 
       const existing = await db.query('SELECT * FROM sale_orders WHERE id = $1', [id]);
       if (existing.rows.length === 0) {
@@ -101,11 +148,12 @@ class SalesController {
 
         const updateQuery = `
           UPDATE sale_orders
-          SET customer_id = $1, order_date = $2, total_amount = $3, remark = $4, salesperson_id = $6
+          SET customer_id = $1, order_date = $2, total_amount = $3, remark = $4, salesperson_id = $6,
+              needs_delivery = $7, delivery_address = $8, delivery_phone = $9
           WHERE id = $5
           RETURNING *
         `;
-        const updateResult = await client.query(updateQuery, [customer_id, order_date, total_amount, remark, id, salesperson_id]);
+        const updateResult = await client.query(updateQuery, [customer_id, order_date, total_amount, remark, id, salesperson_id, delivery.needs_delivery, delivery.delivery_address, delivery.delivery_phone]);
         const updated = updateResult.rows[0];
 
         await client.query('DELETE FROM sale_order_items WHERE so_id = $1', [id]);
@@ -217,12 +265,17 @@ class SalesController {
   // List Sales Invoices
   getAllInvoices = async (req, res) => {
     try {
-      let { page = 1, limit = 10, search = '', sortBy = 'id', order = 'DESC' } = req.query;
+      let { page = 1, limit = 10, sortBy = 'id', order = 'DESC' } = req.query;
       page = Math.max(1, parseInt(page, 10) || 1);
       limit = Math.max(1, parseInt(limit, 10) || 10);
       const offset = (page - 1) * limit;
-      let whereClause = search ? 'WHERE invoice_number ILIKE $1' : '';
-      let params = search ? [`%${search}%`] : [];
+      const { whereClause, params } = buildListWhere(req.query, 'si', 'invoice_number', [
+        ['from', 'invoice_date', 'from'],
+        ['to', 'invoice_date', 'to'],
+        ['customer_id', 'customer_id', 'id'],
+        ['warehouse_id', 'warehouse_id', 'id'],
+        ['route_trip_id', 'route_trip_id', 'id'],
+      ]);
 
       const allowedSortColumns = ['id', 'invoice_number', 'customer_id', 'warehouse_id', 'invoice_date', 'total_amount', 'discount_amount', 'tax_amount', 'net_amount', 'payment_status', 'created_at'];
       if (!allowedSortColumns.includes(sortBy)) sortBy = 'id';
@@ -306,10 +359,25 @@ class SalesController {
       const { id } = req.params;
       const { customer_id, warehouse_id, invoice_date, discount_amount, tax_amount, remark, items } = req.body;
       const salesperson_id = req.body.salesperson_id ? Number(req.body.salesperson_id) : null;
+      const delivery = readDeliveryFields(req.body);
+      if (delivery.error) return res.status(400).json({ error: delivery.error });
 
       const existing = await db.query('SELECT * FROM sales_invoices WHERE id = $1', [id]);
       if (existing.rows.length === 0) {
         return res.status(404).json({ error: 'Sales invoice not found' });
+      }
+      // Unticking "Needs delivery" while the invoice is already on a live
+      // delivery would leave that delivery carrying an invoice that says it
+      // needs none. A failed delivery doesn't count - nothing went out.
+      if (!delivery.needs_delivery) {
+        const onDelivery = await db.query(
+          `SELECT d.delivery_number FROM delivery_invoices di JOIN deliveries d ON d.id = di.delivery_id
+           WHERE di.invoice_id = $1 AND d.status <> 'failed' LIMIT 1`,
+          [id]
+        );
+        if (onDelivery.rows.length > 0) {
+          return res.status(400).json({ error: `This invoice is on delivery ${onDelivery.rows[0].delivery_number}. Remove it from that delivery before unticking "Needs delivery".` });
+        }
       }
       if (existing.rows[0].payment_status !== 'unpaid' && !(await roleHasPermission(req.user?.role_id, MANAGE_SALES_INVOICES_EDIT_PAID))) {
         return res.status(400).json({ error: 'Only unpaid invoices can be edited. Ask an admin for the "edit paid sales invoices" permission.' });
@@ -339,13 +407,15 @@ class SalesController {
         const updateQuery = `
           UPDATE sales_invoices
           SET customer_id = $1, warehouse_id = $2, invoice_date = $3, total_amount = $4,
-              discount_amount = $5, tax_amount = $6, remark = $7, salesperson_id = $9
+              discount_amount = $5, tax_amount = $6, remark = $7, salesperson_id = $9,
+              needs_delivery = $10, delivery_address = $11, delivery_phone = $12
           WHERE id = $8
           RETURNING *
         `;
         const updateResult = await client.query(updateQuery, [
           customer_id, warehouse_id, invoice_date, total_amount,
-          discount_amount || 0, tax_amount || 0, remark, id, salesperson_id
+          discount_amount || 0, tax_amount || 0, remark, id, salesperson_id,
+          delivery.needs_delivery, delivery.delivery_address, delivery.delivery_phone
         ]);
         const updated = updateResult.rows[0];
 
@@ -539,6 +609,8 @@ class SalesController {
     const { so_number, customer_id, order_date, remark, items } = req.body;
     const salesperson_id = req.body.salesperson_id ? Number(req.body.salesperson_id) : null;
     const created_by = req.user.id;
+    const delivery = readDeliveryFields(req.body);
+    if (delivery.error) return res.status(400).json({ error: delivery.error });
 
     try {
       const so = await db.withTransaction(async (client) => {
@@ -551,11 +623,11 @@ class SalesController {
         }
 
         const soQuery = `
-          INSERT INTO sale_orders (so_number, customer_id, order_date, total_amount, remark, created_by, salesperson_id)
-          VALUES ($1, $2, $3, $4, $5, $6, $7)
+          INSERT INTO sale_orders (so_number, customer_id, order_date, total_amount, remark, created_by, salesperson_id, needs_delivery, delivery_address, delivery_phone)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
           RETURNING *
         `;
-        const soResult = await client.query(soQuery, [so_number, customer_id, order_date, total_amount, remark, created_by, salesperson_id]);
+        const soResult = await client.query(soQuery, [so_number, customer_id, order_date, total_amount, remark, created_by, salesperson_id, delivery.needs_delivery, delivery.delivery_address, delivery.delivery_phone]);
         const soRecord = soResult.rows[0];
 
         const itemQuery = `
@@ -588,6 +660,8 @@ class SalesController {
     // RouteController. Must be a trip that is still on route.
     const route_trip_id = req.body.route_trip_id ? Number(req.body.route_trip_id) : null;
     const created_by = req.user.id;
+    const delivery = readDeliveryFields(req.body);
+    if (delivery.error) return res.status(400).json({ error: delivery.error });
 
     try {
       const invoice = await db.withTransaction(async (client) => {
@@ -609,11 +683,11 @@ class SalesController {
         }
 
         const invoiceQuery = `
-          INSERT INTO sales_invoices (invoice_number, so_id, customer_id, warehouse_id, invoice_date, total_amount, discount_amount, tax_amount, remark, created_by, salesperson_id, route_trip_id)
-          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+          INSERT INTO sales_invoices (invoice_number, so_id, customer_id, warehouse_id, invoice_date, total_amount, discount_amount, tax_amount, remark, created_by, salesperson_id, route_trip_id, needs_delivery, delivery_address, delivery_phone)
+          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
           RETURNING *
         `;
-        const iResult = await client.query(invoiceQuery, [invoice_number, so_id, customer_id, warehouse_id, invoice_date, total_amount, discount_amount, tax_amount, remark, created_by, salesperson_id, route_trip_id]);
+        const iResult = await client.query(invoiceQuery, [invoice_number, so_id, customer_id, warehouse_id, invoice_date, total_amount, discount_amount, tax_amount, remark, created_by, salesperson_id, route_trip_id, delivery.needs_delivery, delivery.delivery_address, delivery.delivery_phone]);
         const invoiceRecord = iResult.rows[0];
 
         const itemQuery = `

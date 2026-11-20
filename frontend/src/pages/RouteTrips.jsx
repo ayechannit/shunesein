@@ -482,9 +482,9 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
   };
 
   const renderLoadLines = (form, setter) => (
-    <table className="procurement-items-table">
+    <table className="procurement-items-table items-product-qty">
       <thead>
-        <tr><th>Product</th><th>Quantity</th><th></th></tr>
+        <tr><th>Product</th><th className="col-qty">Quantity</th><th></th></tr>
       </thead>
       <tbody>
         {form.items.map((item, index) => {
@@ -493,7 +493,7 @@ const RouteTrips = ({ token, onLogout, embedded = false, hasPermission = () => t
               <td data-label="Product">
                 <SearchableSelect value={item.product_id} onChange={(value) => updateLine(setter, index, 'product_id', value)} options={productOptions} placeholder="Select product" searchPlaceholder="Search products..." />
               </td>
-              <td data-label="Quantity" style={{ maxWidth: '140px' }}>
+              <td data-label="Quantity" className="col-qty">
                 <input type="number" min="0" step="1" value={item.quantity} onChange={(e) => updateLine(setter, index, 'quantity', e.target.value)} placeholder="0" />
               </td>
               <td data-label="">

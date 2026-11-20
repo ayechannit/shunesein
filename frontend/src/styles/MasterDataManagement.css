@@ -1160,6 +1160,9 @@ tbody tr:hover .action-cell { background: var(--md-surface-soft); }
   text-align: left;
 }
 .searchable-select-trigger:disabled { cursor: not-allowed; opacity: 0.6; }
+.searchable-select-trigger[aria-invalid="true"] { border-color: var(--md-danger, #dc2626); }
+/* The blank "None / All" choice reads as a placeholder, not a real value. */
+.searchable-select-blank { color: var(--md-muted); }
 .searchable-select-trigger:focus { outline: none; border-color: var(--md-primary-line); box-shadow: 0 0 0 3px var(--md-focus-ring); }
 /* min-width: 0 is required for the ellipsis truncation to actually take
    effect - a flex item's default min-width is auto (its content size), so
@@ -1180,6 +1183,7 @@ tbody tr:hover .action-cell { background: var(--md-surface-soft); }
 
 .searchable-select-search {
   display: flex;
+  min-width: 0;
   align-items: center;
   gap: 6px;
   padding: 6px 8px;
@@ -1191,6 +1195,11 @@ tbody tr:hover .action-cell { background: var(--md-surface-soft); }
 .searchable-select-search-icon { width: 14px; height: 14px; color: var(--md-muted); flex-shrink: 0; }
 .searchable-select-search input {
   flex: 1;
+  /* A text input's default width (~20 characters) is its flex minimum, so in
+     a narrow picker (e.g. the product column of a table row) the search box
+     overflowed the panel. min-width: 0 lets it shrink to fit. */
+  min-width: 0;
+  width: 100%;
   border: 0;
   outline: none;
   background: transparent;
@@ -1570,6 +1579,19 @@ input.picker-list-search:focus {
 }
 .picker-list-item:last-child { border-bottom: none; }
 .picker-list-item:hover { background: var(--md-surface-soft); }
+
+/* Delivery picker: invoice + customer on one line, where it goes below. */
+.picker-list-item-delivery { align-items: flex-start; }
+.picker-list-item-delivery input[type="checkbox"] { margin-top: 2px; }
+.picker-delivery-text { display: grid; gap: 2px; min-width: 0; }
+.picker-delivery-title { font-weight: 600; }
+.picker-delivery-where { color: var(--md-muted); font-size: 12px; white-space: pre-line; }
+
+/* Deliveries list: one line per stop (customer + address). */
+.deliver-to-list { display: grid; gap: 6px; max-width: 280px; }
+.deliver-to-stop { display: grid; gap: 1px; min-width: 0; }
+.deliver-to-stop strong { font-weight: 600; font-size: 13px; }
+.deliver-to-stop span { color: var(--md-muted); font-size: 12px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 
 .picker-list-empty {
   padding: 10px;

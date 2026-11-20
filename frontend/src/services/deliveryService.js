@@ -53,5 +53,10 @@ export const deleteDelivery = async (token, id) =>
     method: 'DELETE',
   });
 
-// Sales invoices are shared with the Sales module - reused rather than duplicated here.
-export { fetchSalesInvoices } from './salesService';
+// Invoices that can go on a delivery (ticked "Needs delivery", not on a route
+// trip, not already on another delivery), with their delivery address/phone.
+// Pass the delivery's id when editing so its own invoices stay in the list.
+export const fetchDeliverableInvoices = async (token, deliveryId = null) => {
+  const query = deliveryId ? `?delivery_id=${encodeURIComponent(deliveryId)}` : '';
+  return buildRequest(`${API_ROOT}/deliveries/deliverable-invoices${query}`, token);
+};

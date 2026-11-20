@@ -23,7 +23,7 @@ import {
   updateDelivery,
   deleteDelivery,
   updateDeliveryStatus,
-  fetchSalesInvoices,
+  fetchDeliverableInvoices,
 } from '../services/deliveryService';
 import { formatDate, todayLocal as today } from '../utils/datetime';
 
@@ -62,17 +62,22 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
   const [deleteError, setDeleteError] = useState('');
   const menuRef = useRef(null);
 
-  useEffect(() => {
-    const loadInvoices = async () => {
-      try {
-        const response = await fetchSalesInvoices(token, { page: 1, limit: 1000, sortBy: 'id', order: 'DESC' });
-        setInvoices(response.data || []);
-      } catch {
-        // ignore lookup errors for now
-      }
-    };
-    loadInvoices();
-  }, [token]);
+  const [invoicesLoading, setInvoicesLoading] = useState(false);
+
+  // Loaded each time the form opens, so an invoice just put on another
+  // delivery (or just ticked "Needs delivery") is never stale in the picker.
+  const loadInvoices = async (deliveryId = null) => {
+    setInvoices([]);
+    setInvoicesLoading(true);
+    try {
+      const response = await fetchDeliverableInvoices(token, deliveryId);
+      setInvoices(response.data || []);
+    } catch (err) {
+      if (err.status === 401) onLogout();
+    } finally {
+      setInvoicesLoading(false);
+    }
+  };
 
   useEffect(() => {
     const handleOutside = (event) => {
@@ -105,6 +110,7 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
     setFormValues(emptyForm());
     setFormErrors({});
     setInvoicePickerFilter('');
+    loadInvoices();
     setFormOpen(true);
   };
 
@@ -122,6 +128,7 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
     });
     setFormErrors({});
     setInvoicePickerFilter('');
+    loadInvoices(row.id);
     setFormOpen(true);
   };
 
@@ -206,6 +213,7 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
   const columns = [
     { key: 'delivery_number', label: 'Delivery Number', sortable: true },
     { key: 'invoice_numbers', label: 'Invoices' },
+    { key: 'deliver_to', label: 'Deliver To' },
     { key: 'date', label: 'Date', sortable: true },
     { key: 'vehicle_info', label: 'Vehicle' },
     { key: 'driver_name', label: 'Driver' },
@@ -215,6 +223,20 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
   const renderCell = (row, column) => {
     if (column.key === 'status') return <StatusBadge value={row.status} />;
     if (column.key === 'date') return formatDate(row.date);
+    if (column.key === 'deliver_to') {
+      const stops = (row.invoices || []).filter((inv) => inv.delivery_address || inv.customer_name);
+      if (stops.length === 0) return '-';
+      return (
+        <div className="deliver-to-list">
+          {stops.map((inv) => (
+            <div key={inv.id} className="deliver-to-stop" title={[inv.invoice_number, inv.customer_name, inv.delivery_address, inv.delivery_phone].filter(Boolean).join(' - ')}>
+              <strong>{inv.customer_name || inv.invoice_number}</strong>
+              <span>{inv.delivery_address || 'No address'}{inv.delivery_phone ? ` · ${inv.delivery_phone}` : ''}</span>
+            </div>
+          ))}
+        </div>
+      );
+    }
     if (column.key === 'invoice_numbers') {
       const value = row.invoice_numbers || '';
       if (!value) return '-';
@@ -353,8 +375,9 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
                   className="picker-list-search"
                   value={invoicePickerFilter}
                   onChange={(e) => setInvoicePickerFilter(e.target.value)}
-                  placeholder="Search invoice number or customer..."
+                  placeholder="Search invoice number, customer or address..."
                 />
+                <span className="field-hint">Shows invoices ticked &quot;Needs delivery&quot; that are not on another delivery yet.</span>
                 <div className="picker-list">
                   {invoices
                     .filter((inv) => {
@@ -362,21 +385,30 @@ const Delivery = ({ token, onLogout, embedded = false, hasPermission = () => tru
                       if (!term) return true;
                       return (
                         (inv.invoice_number || '').toLowerCase().includes(term) ||
-                        (inv.customer_name || '').toLowerCase().includes(term)
+                        (inv.customer_name || '').toLowerCase().includes(term) ||
+                        (inv.delivery_address || '').toLowerCase().includes(term)
                       );
                     })
                     .map((inv) => (
-                      <label key={inv.id} className="picker-list-item">
+                      <label key={inv.id} className="picker-list-item picker-list-item-delivery">
                         <input
                           type="checkbox"
                           checked={formValues.invoice_ids.includes(inv.id)}
                           onChange={() => toggleInvoice(inv.id)}
                         />
-                        <span>{inv.invoice_number} - {inv.customer_name || '-'}</span>
+                        <span className="picker-delivery-text">
+                          <span className="picker-delivery-title">{inv.invoice_number} - {inv.customer_name || '-'}</span>
+                          <span className="picker-delivery-where">
+                            {inv.delivery_address || 'No delivery address'}
+                            {inv.delivery_phone ? ` · ${inv.delivery_phone}` : ''}
+                          </span>
+                        </span>
                       </label>
                     ))}
-                  {invoices.length === 0 ? (
-                    <div className="picker-list-empty">No sales invoices available.</div>
+                  {invoicesLoading ? (
+                    <div className="picker-list-empty">Loading invoices...</div>
+                  ) : invoices.length === 0 ? (
+                    <div className="picker-list-empty">No invoices waiting for delivery. Tick &quot;Needs delivery&quot; on a sales invoice to see it here.</div>
                   ) : null}
                 </div>
                 {formErrors.invoice_ids ? <div className="field-error">{formErrors.invoice_ids}</div> : null}

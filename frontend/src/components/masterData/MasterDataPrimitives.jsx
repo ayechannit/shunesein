@@ -625,13 +625,18 @@ export const FormField = ({
           aria-invalid={Boolean(error)}
           rows={field.rows || 4}
         />
-      ) : field.type === 'searchable-select' ? (
+      ) : field.type === 'searchable-select' || (field.type === 'select' && field.lookupKey) ? (
+        // Lookup-backed selects (categories, users, roles...) are database
+        // lists that grow, so they get the searchable picker automatically.
         <SearchableSelect
+          id={inputId}
           value={value ?? ''}
           onChange={(newValue) => onChange(field.key, newValue)}
           options={sourceOptions}
           placeholder={field.placeholder || 'Select an option'}
           searchPlaceholder={field.searchPlaceholder || 'Search...'}
+          allowEmpty={!field.required}
+          invalid={Boolean(error)}
         />
       ) : field.type === 'select' ? (
         <select
@@ -836,28 +841,48 @@ export const SearchableSelect = ({
   searchPlaceholder = 'Search...',
   emptyLabel = 'No matches',
   disabled = false,
+  // Optional fields: adds the placeholder itself as a first choice (value '')
+  // so a picked value can be cleared again, like a plain <select>'s blank option.
+  allowEmpty = false,
+  // The search box only appears when the list is longer than this - typing
+  // to filter 3 payment methods is just an extra click.
+  searchThreshold = 7,
+  id,
+  invalid = false,
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
   const inputRef = useRef(null);
 
+  const allOptions = useMemo(() => {
+    if (!allowEmpty || options.some((option) => String(option.value) === '')) return options;
+    return [{ value: '', label: placeholder }, ...options];
+  }, [allowEmpty, options, placeholder]);
+
+  const showSearch = options.length > searchThreshold;
+
   const selectedLabel = useMemo(() => {
-    const match = options.find((option) => String(option.value) === String(value ?? ''));
+    if (String(value ?? '') === '') {
+      const blank = options.find((option) => String(option.value) === '');
+      return blank ? blank.label : '';
+    }
+    const match = options.find((option) => String(option.value) === String(value));
     return match ? match.label : '';
   }, [options, value]);
 
   const filteredOptions = useMemo(() => {
     const term = query.trim().toLowerCase();
-    if (!term) return options;
-    return options.filter((option) => option.label.toLowerCase().includes(term));
-  }, [options, query]);
+    if (!term) return allOptions;
+    return allOptions.filter((option) => String(option.label).toLowerCase().includes(term));
+  }, [allOptions, query]);
 
   useEffect(() => {
     if (!open) return undefined;
     setQuery('');
+    if (!showSearch) return undefined;
     const raf = requestAnimationFrame(() => inputRef.current?.focus());
     return () => cancelAnimationFrame(raf);
-  }, [open]);
+  }, [open, showSearch]);
 
   const selectOption = (option) => {
     onChange(option.value);
@@ -871,7 +896,7 @@ export const SearchableSelect = ({
       className="searchable-select-panel"
       matchTriggerWidth
       trigger={
-        <button type="button" className="searchable-select-trigger" disabled={disabled}>
+        <button type="button" id={id} className="searchable-select-trigger" disabled={disabled} aria-invalid={invalid || undefined}>
           <span className={selectedLabel ? 'searchable-select-value' : 'searchable-select-placeholder'}>
             {selectedLabel || placeholder}
           </span>
@@ -879,6 +904,7 @@ export const SearchableSelect = ({
         </button>
       }
     >
+      {showSearch ? (
       <div className="searchable-select-search">
         <SearchIcon className="searchable-select-search-icon" />
         <input
@@ -895,6 +921,7 @@ export const SearchableSelect = ({
           placeholder={searchPlaceholder}
         />
       </div>
+      ) : null}
       <div className="searchable-select-options">
         {filteredOptions.length === 0 ? (
           <div className="searchable-select-empty">{emptyLabel}</div>
@@ -902,8 +929,8 @@ export const SearchableSelect = ({
           filteredOptions.map((option) => (
             <button
               type="button"
-              key={option.value}
-              className={`dropdown-menu-item ${String(option.value) === String(value ?? '') ? 'active' : ''}`}
+              key={String(option.value) || '__empty'}
+              className={`dropdown-menu-item ${String(option.value) === String(value ?? '') ? 'active' : ''} ${String(option.value) === '' ? 'searchable-select-blank' : ''}`}
               onClick={() => selectOption(option)}
             >
               {option.label}

@@ -1655,7 +1655,7 @@ export const MASTER_DATA_MODULES = {
       {
         key: 'timezone',
         label: 'Timezone',
-        type: 'select',
+        type: 'searchable-select',
         defaultValue: 'UTC',
         placeholder: 'UTC',
         options: timezoneOptions,

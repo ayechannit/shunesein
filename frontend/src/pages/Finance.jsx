@@ -15,6 +15,7 @@ import {
   StatusBadge,
   StatTile,
   TrashIcon,
+  SearchableSelect,
 } from '../components/masterData/MasterDataPrimitives';
 import {
   fetchIncomeExpenseCategories,
@@ -309,18 +310,12 @@ const EntriesTab = ({ token, onLogout, accounts, categories, menuRef, menuOpenId
             <div className="form-grid">
               <div className="form-field">
                 <label>Category *</label>
-                <select value={formValues.category_id} onChange={(e) => setFormValues((p) => ({ ...p, category_id: e.target.value }))}>
-                  <option value="">Select category</option>
-                  {categories.map((c) => <option key={c.id} value={c.id}>{c.name} ({c.type})</option>)}
-                </select>
+                <SearchableSelect value={formValues.category_id} onChange={(value) => setFormValues((p) => ({ ...p, category_id: value }))} options={categories.map((c) => ({ value: String(c.id), label: `${c.name} (${c.type})` }))} placeholder="Select category" />
                 {formErrors.category_id ? <div className="field-error">{formErrors.category_id}</div> : null}
               </div>
               <div className="form-field">
                 <label>Account *</label>
-                <select value={formValues.account_id} onChange={(e) => setFormValues((p) => ({ ...p, account_id: e.target.value }))}>
-                  <option value="">Select account</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <SearchableSelect value={formValues.account_id} onChange={(value) => setFormValues((p) => ({ ...p, account_id: value }))} options={accounts.map((a) => ({ value: String(a.id), label: a.name }))} placeholder="Select account" />
                 {formErrors.account_id ? <div className="field-error">{formErrors.account_id}</div> : null}
               </div>
               <div className="form-field">
@@ -574,18 +569,12 @@ const TransfersTab = ({ token, onLogout, accounts, menuRef, menuOpenId, setMenuO
               </div>
               <div className="form-field">
                 <label>From Account *</label>
-                <select value={formValues.from_account_id} onChange={(e) => setFormValues((p) => ({ ...p, from_account_id: e.target.value }))}>
-                  <option value="">Select account</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <SearchableSelect value={formValues.from_account_id} onChange={(value) => setFormValues((p) => ({ ...p, from_account_id: value }))} options={accounts.map((a) => ({ value: String(a.id), label: a.name }))} placeholder="Select account" />
                 {formErrors.from_account_id ? <div className="field-error">{formErrors.from_account_id}</div> : null}
               </div>
               <div className="form-field">
                 <label>To Account *</label>
-                <select value={formValues.to_account_id} onChange={(e) => setFormValues((p) => ({ ...p, to_account_id: e.target.value }))}>
-                  <option value="">Select account</option>
-                  {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-                </select>
+                <SearchableSelect value={formValues.to_account_id} onChange={(value) => setFormValues((p) => ({ ...p, to_account_id: value }))} options={accounts.map((a) => ({ value: String(a.id), label: a.name }))} placeholder="Select account" />
                 {formErrors.to_account_id ? <div className="field-error">{formErrors.to_account_id}</div> : null}
               </div>
               <div className="form-field">
@@ -657,10 +646,7 @@ const LedgerTab = ({ token, onLogout, accounts }) => {
       <div className="procurement-grid">
         <div className="form-field">
           <label>Account *</label>
-          <select value={accountId} onChange={(e) => handleAccountChange(e.target.value)}>
-            <option value="">Select an account</option>
-            {accounts.map((a) => <option key={a.id} value={a.id}>{a.name}</option>)}
-          </select>
+          <SearchableSelect value={accountId} onChange={(value) => handleAccountChange(value)} options={accounts.map((a) => ({ value: String(a.id), label: a.name }))} placeholder="Select an account" />
         </div>
         <div className="form-field">
           <label>From</label>

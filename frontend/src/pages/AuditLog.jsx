@@ -8,6 +8,7 @@ import {
   Pagination,
   RefreshIcon,
   StatusBadge,
+  SearchableSelect,
 } from '../components/masterData/MasterDataPrimitives';
 import { fetchAuditLogs, fetchUsersForFilter, fetchActivitySummary } from '../services/auditService';
 import { formatDateTime } from '../utils/datetime';
@@ -181,10 +182,7 @@ const AuditLog = ({ token, onLogout, embedded = false, viewerTimezone }) => {
           <div className="procurement-grid">
             <div className="form-field">
               <label>User</label>
-              <select value={filters.user_id} onChange={(e) => setFilters((p) => ({ ...p, user_id: e.target.value }))}>
-                <option value="">All users</option>
-                {users.map((u) => <option key={u.id} value={u.id}>{u.username}</option>)}
-              </select>
+              <SearchableSelect value={filters.user_id} onChange={(value) => setFilters((p) => ({ ...p, user_id: value }))} options={users.map((u) => ({ value: String(u.id), label: u.username }))} placeholder="All users" allowEmpty />
             </div>
             <div className="form-field">
               <label>Action</label>

@@ -29,6 +29,9 @@
 .procurement-toolbar > .search-toolbar { flex: 1 1 560px; min-width: 0; }
 .procurement-toolbar > .search-toolbar > .search-card { width: 100%; }
 .procurement-toolbar > .procurement-actions { flex: 0 0 auto; }
+/* Report filter rows (dates + Customer/Warehouse/Trip...) can be wider than
+   the page: let them take the full row and wrap instead of overflowing. */
+.procurement-toolbar > .procurement-actions.report-filter-row { flex: 1 1 100%; min-width: 0; }
 
 /* Filter fields in a toolbar row (Reports date-range/product/warehouse
    filters). flex-basis (not min-width) gives these a deterministic width
@@ -160,6 +163,14 @@
   width: 48px;
 }
 
+/* Product + Quantity only (Route Trip load / add stock): the 32% product
+   column above left most of the row to Quantity, so long product names
+   wrapped. Let Product take whatever Quantity and the remove button don't. */
+.procurement-items-table.items-product-qty th:first-child,
+.procurement-items-table.items-product-qty td:first-child {
+  width: auto;
+}
+
 /* Quantity/Price/Lot/Expiry/Subtotal columns get a sane floor so their
    inputs never shrink below a usable width - without this, table
    auto-layout splits whatever space is left over evenly, which crushed the
@@ -261,6 +272,36 @@
 .item-remove-btn:hover {
   background: var(--md-danger-soft);
   border-color: var(--md-danger-line);
+}
+
+/* ─── Sales list / report filters (From, To, Customer, Warehouse, Trip) ─── */
+.sales-filter-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 12px;
+  padding: 12px 16px;
+  border: 1px solid var(--md-border);
+  border-radius: var(--md-radius);
+  background: var(--md-surface);
+}
+.sales-filter-field { width: 220px; max-width: 100%; margin: 0; }
+.sales-filter-field.sales-filter-date { width: 160px; }
+.sales-filter-clear { height: 38px; }
+@media (max-width: 720px) {
+  .sales-filter-field,
+  .sales-filter-field.sales-filter-date { width: 100%; }
+}
+
+/* ─── Needs delivery (sale order / invoice form) ─── */
+.delivery-fields { gap: 10px; }
+.delivery-fields-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(0, 1fr);
+  gap: 12px;
+}
+@media (max-width: 720px) {
+  .delivery-fields-grid { grid-template-columns: minmax(0, 1fr); }
 }
 
 /* ─── Product hint ─── */

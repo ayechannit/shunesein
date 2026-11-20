@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import '../styles/Procurement.css';
 import { PageHeader, AppButton, SearchableSelect, Pagination, DownloadIcon } from '../components/masterData/MasterDataPrimitives';
+import { SalesFilterFields, emptySalesFilters, useRouteTripOptions } from '../components/SalesFilters';
 import {
   fetchCurrentStock,
   fetchLowStock,
@@ -93,7 +94,7 @@ const formatNumber = (value) => {
 // Sales Summary, P&L, Stock Ledger, Stock Movement).
 const DateRangeFilter = ({ from, to, onFromChange, onToChange, onApply, extra }) => (
   <div className="procurement-toolbar">
-    <div className="procurement-actions" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
+    <div className="procurement-actions report-filter-row" style={{ alignItems: 'flex-end', flexWrap: 'wrap' }}>
       <div className="form-field">
         <label>From</label>
         <input type="date" value={from} onChange={(e) => onFromChange(e.target.value)} />
@@ -107,6 +108,23 @@ const DateRangeFilter = ({ from, to, onFromChange, onToChange, onApply, extra })
     </div>
   </div>
 );
+
+// Extra filters for the sales reports; dates come from DateRangeFilter.
+const SalesReportFilters = ({ filters, setFilters, lookups }) => (
+  <SalesFilterFields
+    values={filters}
+    onChange={(key, value) => setFilters((previous) => ({ ...previous, [key]: value }))}
+    customers={lookups.customers}
+    warehouses={lookups.warehouses}
+    tripOptions={lookups.tripOptions}
+    showDates={false}
+  />
+);
+const salesFilterParams = (filters) => ({
+  customer_id: filters.customer_id || undefined,
+  warehouse_id: filters.warehouse_id || undefined,
+  route_trip_id: filters.route_trip_id || undefined,
+});
 
 const ReportShell = ({ loading, error, children }) => (
   <div className="procurement-shell">
@@ -810,9 +828,10 @@ const ProductionSummaryReport = ({ token, onLogout }) => {
 };
 
 // ─────────────────────────── Sales Summary ───────────────────────────
-const SalesSummaryReport = ({ token, onLogout, onSelectCustomer }) => {
+const SalesSummaryReport = ({ token, onLogout, onSelectCustomer, salesLookups }) => {
   const [from, setFrom] = useState(firstOfMonth());
   const [to, setTo] = useState(today());
+  const [filters, setFilters] = useState(emptySalesFilters);
   const [compare, setCompare] = useState(false);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -822,7 +841,7 @@ const SalesSummaryReport = ({ token, onLogout, onSelectCustomer }) => {
     setLoading(true);
     setError('');
     try {
-      setData(await fetchSalesSummary(token, { from, to, compare: nextCompare ? 'true' : undefined }));
+      setData(await fetchSalesSummary(token, { from, to, ...salesFilterParams(filters), compare: nextCompare ? 'true' : undefined }));
     } catch (err) {
       if (err.status === 401) return onLogout();
       setError(err.message || 'Unable to load report');
@@ -841,7 +860,12 @@ const SalesSummaryReport = ({ token, onLogout, onSelectCustomer }) => {
         onFromChange={setFrom}
         onToChange={setTo}
         onApply={() => load()}
-        extra={<CompareToggle checked={compare} onChange={(v) => { setCompare(v); load(v); }} />}
+        extra={(
+          <>
+            <SalesReportFilters filters={filters} setFilters={setFilters} lookups={salesLookups} />
+            <CompareToggle checked={compare} onChange={(v) => { setCompare(v); load(v); }} />
+          </>
+        )}
       />
       <ReportShell loading={loading} error={error}>
         {!data ? null : (
@@ -2786,9 +2810,10 @@ const DocumentRegisterReport = ({ token, onLogout }) => {
 };
 
 // ─────────────────────────── Salesperson Performance ───────────────────────────
-const SalespersonPerformanceReport = ({ token, onLogout }) => {
+const SalespersonPerformanceReport = ({ token, onLogout, salesLookups }) => {
   const [from, setFrom] = useState(firstOfMonth());
   const [to, setTo] = useState(today());
+  const [filters, setFilters] = useState(emptySalesFilters);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -2797,7 +2822,7 @@ const SalespersonPerformanceReport = ({ token, onLogout }) => {
     setLoading(true);
     setError('');
     try {
-      setData(await fetchSalespersonPerformance(token, { from, to }));
+      setData(await fetchSalespersonPerformance(token, { from, to, ...salesFilterParams(filters) }));
     } catch (err) {
       if (err.status === 401) return onLogout();
       setError(err.message || 'Unable to load report');
@@ -2810,7 +2835,14 @@ const SalespersonPerformanceReport = ({ token, onLogout }) => {
 
   return (
     <>
-      <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} onApply={load} />
+      <DateRangeFilter
+        from={from}
+        to={to}
+        onFromChange={setFrom}
+        onToChange={setTo}
+        onApply={load}
+        extra={<SalesReportFilters filters={filters} setFilters={setFilters} lookups={salesLookups} />}
+      />
       <ReportShell loading={loading} error={error}>
         {data ? (
           <div className="procurement-summary" style={{ marginLeft: 0, marginBottom: '16px' }}>
@@ -3464,9 +3496,10 @@ const JournalRegisterReport = ({ token, onLogout }) => {
 };
 
 // ─────────────────────────── Sales by Category ───────────────────────────
-const SalesByCategoryReport = ({ token, onLogout }) => {
+const SalesByCategoryReport = ({ token, onLogout, salesLookups }) => {
   const [from, setFrom] = useState(firstOfMonth());
   const [to, setTo] = useState(today());
+  const [filters, setFilters] = useState(emptySalesFilters);
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
@@ -3475,7 +3508,7 @@ const SalesByCategoryReport = ({ token, onLogout }) => {
     setLoading(true);
     setError('');
     try {
-      setData(await fetchSalesByCategory(token, { from, to }));
+      setData(await fetchSalesByCategory(token, { from, to, ...salesFilterParams(filters) }));
     } catch (err) {
       if (err.status === 401) return onLogout();
       setError(err.message || 'Unable to load report');
@@ -3488,7 +3521,14 @@ const SalesByCategoryReport = ({ token, onLogout }) => {
 
   return (
     <>
-      <DateRangeFilter from={from} to={to} onFromChange={setFrom} onToChange={setTo} onApply={load} />
+      <DateRangeFilter
+        from={from}
+        to={to}
+        onFromChange={setFrom}
+        onToChange={setTo}
+        onApply={load}
+        extra={<SalesReportFilters filters={filters} setFilters={setFilters} lookups={salesLookups} />}
+      />
       <ReportShell loading={loading} error={error}>
         {data ? (
           <div className="procurement-summary" style={{ marginLeft: 0, marginBottom: '16px' }}>
@@ -3696,6 +3736,9 @@ const Reports = ({ token, onLogout, embedded = false, defaultTab = 'current-stoc
   };
 
   const shared = { token, onLogout, warehouses, products };
+  const isSalesReport = ['sales-summary', 'salesperson-performance', 'sales-by-category'].includes(activeTab);
+  const tripOptions = useRouteTripOptions(isSalesReport ? token : null);
+  const salesLookups = { customers, warehouses, tripOptions };
   const titleFor = TITLES[activeTab] || { title: 'Reports', description: '' };
 
   const content = (
@@ -3710,7 +3753,7 @@ const Reports = ({ token, onLogout, embedded = false, defaultTab = 'current-stoc
       {activeTab === 'stock-ledger' && <StockLedgerReport {...shared} />}
       {activeTab === 'purchase-summary' && <PurchaseSummaryReport {...shared} onSelectSupplier={goToSupplierStatement} />}
       {activeTab === 'production-summary' && <ProductionSummaryReport {...shared} />}
-      {activeTab === 'sales-summary' && <SalesSummaryReport {...shared} onSelectCustomer={goToCustomerStatement} />}
+      {activeTab === 'sales-summary' && <SalesSummaryReport {...shared} salesLookups={salesLookups} onSelectCustomer={goToCustomerStatement} />}
       {activeTab === 'outstanding' && <OutstandingReport {...shared} onSelectCustomer={goToCustomerStatement} onSelectSupplier={goToSupplierStatement} />}
       {activeTab === 'profit-loss' && <ProfitLossReport {...shared} />}
       {activeTab === 'tax-summary' && <TaxSummaryReport {...shared} />}
@@ -3731,7 +3774,7 @@ const Reports = ({ token, onLogout, embedded = false, defaultTab = 'current-stoc
       {activeTab === 'supplier-deposit-register' && <SupplierDepositRegisterReport {...shared} />}
       {activeTab === 'delivery-performance' && <DeliveryPerformanceReport {...shared} />}
       {activeTab === 'document-register' && <DocumentRegisterReport {...shared} />}
-      {activeTab === 'salesperson-performance' && <SalespersonPerformanceReport {...shared} />}
+      {activeTab === 'salesperson-performance' && <SalespersonPerformanceReport {...shared} salesLookups={salesLookups} />}
       {activeTab === 'supplier-scorecard' && <SupplierScorecardReport {...shared} />}
       {activeTab === 'expiry-report' && <ExpiryReport {...shared} />}
       {activeTab === 'sales-returns-report' && <SalesReturnsReport {...shared} />}
@@ -3740,7 +3783,7 @@ const Reports = ({ token, onLogout, embedded = false, defaultTab = 'current-stoc
       {activeTab === 'trial-balance' && <TrialBalanceReport {...shared} />}
       {activeTab === 'balance-sheet' && <BalanceSheetReport {...shared} />}
       {activeTab === 'journal-register' && <JournalRegisterReport {...shared} />}
-      {activeTab === 'sales-by-category' && <SalesByCategoryReport {...shared} />}
+      {activeTab === 'sales-by-category' && <SalesByCategoryReport {...shared} salesLookups={salesLookups} />}
       {activeTab === 'payment-method-analysis' && <PaymentMethodAnalysisReport {...shared} />}
     </>
   );

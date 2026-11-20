@@ -597,10 +597,7 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
                           {formErrors[`rm-product-${index}`] ? <div className="field-error">{formErrors[`rm-product-${index}`]}</div> : null}
                         </td>
                         <td data-label="Source Warehouse" className="col-warehouse">
-                          <select value={item.warehouse_id} onChange={(e) => updateRawItem(index, 'warehouse_id', e.target.value)}>
-                            <option value="">Select warehouse</option>
-                            {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                          </select>
+                          <SearchableSelect value={item.warehouse_id} onChange={(value) => updateRawItem(index, 'warehouse_id', value)} options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))} placeholder="Select warehouse" />
                           {formErrors[`rm-warehouse-${index}`] ? <div className="field-error">{formErrors[`rm-warehouse-${index}`]}</div> : null}
                         </td>
                         <td data-label="Quantity" className="col-qty"><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateRawItem(index, 'quantity', e.target.value)} /></td>
@@ -732,10 +729,7 @@ const ProductionBatchesTab = ({ token, onLogout, warehouses, rawMaterialOptions,
                           />
                         </td>
                         <td data-label="Destination Warehouse" className="col-warehouse">
-                          <select value={item.warehouse_id} onChange={(e) => updateCompleteItem(index, 'warehouse_id', e.target.value)}>
-                            <option value="">Select warehouse</option>
-                            {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                          </select>
+                          <SearchableSelect value={item.warehouse_id} onChange={(value) => updateCompleteItem(index, 'warehouse_id', value)} options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))} placeholder="Select warehouse" />
                         </td>
                         <td data-label="Quantity" className="col-qty"><input type="number" min="0.01" step="0.01" value={item.quantity} onChange={(e) => updateCompleteItem(index, 'quantity', e.target.value)} /></td>
                         <td data-label="Unit Cost" className="col-price"><input type="number" min="0" step="0.01" value={item.unit_cost} onChange={(e) => updateCompleteItem(index, 'unit_cost', e.target.value)} /></td>
@@ -1050,18 +1044,12 @@ const StockTransfersTab = ({ token, onLogout, warehouses, productOptions, menuRe
               </div>
               <div className="form-field">
                 <label>From Warehouse *</label>
-                <select value={formValues.from_warehouse_id} onChange={(e) => setFormValues((p) => ({ ...p, from_warehouse_id: e.target.value }))}>
-                  <option value="">Select warehouse</option>
-                  {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
+                <SearchableSelect value={formValues.from_warehouse_id} onChange={(value) => setFormValues((p) => ({ ...p, from_warehouse_id: value }))} options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))} placeholder="Select warehouse" />
                 {formErrors.from_warehouse_id ? <div className="field-error">{formErrors.from_warehouse_id}</div> : null}
               </div>
               <div className="form-field">
                 <label>To Warehouse *</label>
-                <select value={formValues.to_warehouse_id} onChange={(e) => setFormValues((p) => ({ ...p, to_warehouse_id: e.target.value }))}>
-                  <option value="">Select warehouse</option>
-                  {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
+                <SearchableSelect value={formValues.to_warehouse_id} onChange={(value) => setFormValues((p) => ({ ...p, to_warehouse_id: value }))} options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))} placeholder="Select warehouse" />
                 {formErrors.to_warehouse_id ? <div className="field-error">{formErrors.to_warehouse_id}</div> : null}
               </div>
               <div className="form-field form-field-full">
@@ -1412,10 +1400,7 @@ const StockAdjustmentsTab = ({ token, onLogout, warehouses, productOptions, menu
               </div>
               <div className="form-field">
                 <label>Warehouse *</label>
-                <select value={formValues.warehouse_id} onChange={(e) => setFormValues((p) => ({ ...p, warehouse_id: e.target.value }))}>
-                  <option value="">Select warehouse</option>
-                  {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-                </select>
+                <SearchableSelect value={formValues.warehouse_id} onChange={(value) => setFormValues((p) => ({ ...p, warehouse_id: value }))} options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))} placeholder="Select warehouse" />
                 {formErrors.warehouse_id ? <div className="field-error">{formErrors.warehouse_id}</div> : null}
               </div>
               <div className="form-field form-field-full">
@@ -1684,10 +1669,7 @@ const StockCountTab = ({ token, onLogout, warehouses, setPageSuccess, setPageErr
       <div className="procurement-grid">
         <div className="form-field">
           <label>Warehouse *</label>
-          <select value={warehouseId} onChange={(e) => handleWarehouseChange(e.target.value)}>
-            <option value="">Select a warehouse to count</option>
-            {warehouses.map((w) => <option key={w.id} value={w.id}>{w.name}</option>)}
-          </select>
+          <SearchableSelect value={warehouseId} onChange={(value) => handleWarehouseChange(value)} options={warehouses.map((w) => ({ value: String(w.id), label: w.name }))} placeholder="Select a warehouse to count" />
         </div>
         <div className="form-field form-field-full">
           <label>Remark</label>
